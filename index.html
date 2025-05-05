@@ -9,1013 +9,375 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.25.0/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/z3-solver@4.12.2/build/z3.js"></script>
-    <script src="node_modules/react/umd/react.production.min.js"></script>
-<script src="node_modules/react-dom/umd/react-dom.production.min.js"></script>
-<script src="node_modules/cytoscape/dist/cytoscape.min.js"></script>
-<script src="node_modules/z3-solver/build/z3.js"></script>
     <style>
         .code-block {
             background: #f4f4f4;
             border: 1px solid #ddd;
-            padding: 10px;
-            font-family: monospace;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
             white-space: pre-wrap;
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.4;
         }
         #cfg-original, #cfg-ssa {
-            height: 300px;
+            height: 400px;
             border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            background: #fff;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100px;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
-<body>
+<body class="bg-gray-50">
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // Parser
-        class Parser {
-            constructor(input) {
-                this.tokens = this.tokenize(input);
-                this.pos = 0;
-            }
+        // ... [Previous class implementations remain unchanged]
 
-            tokenize(input) {
-                const tokenRegex = /\s*(:=|if|else|while|for|assert|range|[(){};,\[\]]|[<>]=?|==|[+\-*/]|\w+|\d+)/g;
-                let tokens = [];
-                let match;
-                while ((match = tokenRegex.exec(input)) !== null) {
-                    tokens.push(match[0]);
-                }
-                return tokens;
-            }
-
-            peek() {
-                return this.pos < this.tokens.length ? this.tokens[this.pos] : null;
-            }
-
-            consume(expected) {
-                if (this.peek() === expected) {
-                    return this.tokens[this.pos++];
-                }
-                throw new Error(`Expected ${expected}, got ${this.peek()}`);
-            }
-
-            parseProgram() {
-                const statements = [];
-                while (this.peek() && this.peek() !== '}') {
-                    statements.push(this.parseStatement());
-                }
-                return { type: 'Program', statements };
-            }
-
-            parseStatement() {
-                if (this.peek() === 'if') {
-                    return this.parseIfElse();
-                } else if (this.peek() === 'while') {
-                    return this.parseWhile();
-                } else if (this.peek() === 'for') {
-                    return this.parseFor();
-                } else if (this.peek() === 'assert') {
-                    return this.parseAssert();
-                } else {
-                    return this.parseAssignment();
-                }
-            }
-
-            parseAssignment() {
-                const target = this.peek();
-                if (!/^[a-zA-Z][\w]*$/.test(target) && target !== '[') {
-                    throw new Error(`Invalid variable name: ${target}`);
-                }
-                if (target === '[') {
-                    this.consume('[');
-                    const array = this.consume(/^[a-zA-Z][\w]*$/);
-                    const index = this.parseExpression();
-                    this.consume(']');
-                    this.consume(':=');
-                    const value = this.parseExpression();
-                    this.consume(';');
-                    return { type: 'ArrayAssignment', array, index, value };
-                }
-                this.pos++;
-                this.consume(':=');
-                const value = this.parseExpression();
-                this.consume(';');
-                return { type: 'Assignment', target, value };
-            }
-
-            parseIfElse() {
-                this.consume('if');
-                this.consume('(');
-                const condition = this.parseExpression();
-                this.consume(')');
-                this.consume('{');
-                const thenBranch = this.parseProgram();
-                this.consume('}');
-                let elseBranch = null;
-                if (this.peek() === 'else') {
-                    this.consume('else');
-                    this.consume('{');
-                    elseBranch = this.parseProgram();
-                    this.consume('}');
-                }
-                return { type: 'IfElse', condition, thenBranch, elseBranch };
-            }
-
-            parseWhile() {
-                this.consume('while');
-                this.consume('(');
-                const condition = this.parseExpression();
-                this.consume(')');
-                this.consume('{');
-                const body = this.parseProgram();
-                this.consume('}');
-                return { type: 'While', condition, body };
-            }
-
-            parseFor() {
-                this.consume('for');
-                this.consume('(');
-                const init = this.parseAssignment();
-                const condition = this.parseExpression();
-                this.consume(';');
-                const update = this.parseAssignment();
-                this.consume(')');
-                this.consume('{');
-                const body = this.parseProgram();
-                this.consume('}');
-                return { type: 'For', init, condition, update, body };
-            }
-
-            parseAssert() {
-                this.consume('assert');
-                this.consume('(');
-                if (this.peek() === 'for') {
-                    this.consume('for');
-                    this.consume('(');
-                    const varName = this.consume(/^[a-zA-Z][\w]*$/);
-                    this.consume('in');
-                    this.consume('range');
-                    this.consume('(');
-                    const rangeEnd = this.parseExpression();
-                    this.consume(')');
-                    this.consume(')');
-                    this.consume(':');
-                    const condition = this.parseExpression();
-                    this.consume(')');
-                    this.consume(';');
-                    return { type: 'ArrayAssert', varName, rangeEnd, condition };
-                }
-                const condition = this.parseExpression();
-                this.consume(')');
-                this.consume(';');
-                return { type: 'Assert', condition };
-            }
-
-            parseExpression() {
-                let left = this.parseTerm();
-                while (['+', '-', '<', '>', '<=', '>=', '=='].includes(this.peek())) {
-                    const op = this.peek();
-                    this.pos++;
-                    const right = this.parseTerm();
-                    left = { type: 'Binary', op, left, right };
-                }
-                return left;
-            }
-
-            parseTerm() {
-                const token = this.peek();
-                if (/^\d+$/.test(token)) {
-                    this.pos++;
-                    return { type: 'Constant', value: parseInt(token) };
-                } else if (/^[a-zA-Z][\w]*$/.test(token)) {
-                    this.pos++;
-                    return { type: 'Variable', name: token };
-                } else if (token === '[') {
-                    this.consume('[');
-                    const array = this.consume(/^[a-zA-Z][\w]*$/);
-                    const index = this.parseExpression();
-                    this.consume(']');
-                    return { type: 'ArrayAccess', array, index };
-                } else if (token === '(') {
-                    this.consume('(');
-                    const expr = this.parseExpression();
-                    this.consume(')');
-                    return expr;
-                }
-                throw new Error(`Invalid expression token: ${token}`);
-            }
-        }
-
-        // SSA Transformation
-        class SSAConverter {
-            constructor() {
-                this.varVersions = new Map();
-                this.phiNodes = [];
-                this.statements = [];
-            }
-
-            getVersion(varName) {
-                const count = this.varVersions.get(varName) || 0;
-                this.varVersions.set(varName, count + 1);
-                return `${varName}${count}`;
-            }
-
-            convertProgram(ast, unrollDepth) {
-                this.statements = [];
-                this.phiNodes = [];
-                this.varVersions.clear();
-                this.convertStatements(ast.statements, unrollDepth);
-                return { statements: this.statements, phiNodes: this.phiNodes };
-            }
-
-            convertStatements(statements, unrollDepth) {
-                for (const stmt of statements) {
-                    this.convertStatement(stmt, unrollDepth);
-                }
-            }
-
-            convertStatement(stmt, unrollDepth) {
-                switch (stmt.type) {
-                    case 'Assignment':
-                        const value = this.convertExpression(stmt.value);
-                        const newVar = this.getVersion(stmt.target);
-                        this.statements.push({ type: 'Assignment', target: newVar, value });
-                        break;
-                    case 'ArrayAssignment':
-                        const arrayValue = this.convertExpression(stmt.value);
-                        const index = this.convertExpression(stmt.index);
-                        const newArray = this.getVersion(stmt.array);
-                        this.statements.push({ type: 'ArrayAssignment', array: newArray, index, value: arrayValue });
-                        break;
-                    case 'IfElse':
-                        const condition = this.convertExpression(stmt.condition);
-                        const thenVars = new Map();
-                        const elseVars = new Map();
-                        const originalVersions = new Map(this.varVersions);
-                        this.convertStatements(stmt.thenBranch.statements, unrollDepth);
-                        stmt.thenBranch.statements.forEach(() => this.varVersions.forEach((v, k) => thenVars.set(k, `${k}${v-1}`)));
-                        this.varVersions = new Map(originalVersions);
-                        if (stmt.elseBranch) {
-                            this.convertStatements(stmt.elseBranch.statements, unrollDepth);
-                            stmt.elseBranch.statements.forEach(() => this.varVersions.forEach((v, k) => elseVars.set(k, `${k}${v-1}`)));
-                        }
-                        this.varVersions = new Map(originalVersions);
-                        for (const [varName] of originalVersions) {
-                            const thenVar = thenVars.get(varName) || `${varName}${originalVersions.get(varName)}`;
-                            const elseVar = elseVars.get(varName) || `${varName}${originalVersions.get(varName)}`;
-                            if (thenVar !== elseVar) {
-                                const newVar = this.getVersion(varName);
-                                this.phiNodes.push({ type: 'Phi', target: newVar, vars: [thenVar, elseVar], condition });
-                            }
-                        }
-                        break;
-                    case 'While':
-                        this.unrollWhile(stmt, unrollDepth);
-                        break;
-                    case 'For':
-                        this.unrollFor(stmt, unrollDepth);
-                        break;
-                    case 'Assert':
-                        this.statements.push({ type: 'Assert', condition: this.convertExpression(stmt.condition) });
-                        break;
-                    case 'ArrayAssert':
-                        this.statements.push({
-                            type: 'ArrayAssert',
-                            varName: stmt.varName,
-                            rangeEnd: this.convertExpression(stmt.rangeEnd),
-                            condition: this.convertExpression(stmt.condition)
-                        });
-                        break;
-                }
-            }
-
-            convertExpression(expr) {
-                switch (expr.type) {
-                    case 'Constant':
-                        return expr;
-                    case 'Variable':
-                        const version = this.varVersions.get(expr.name) || 0;
-                        return { type: 'Variable', name: `${expr.name}${version}` };
-                    case 'ArrayAccess':
-                        return { type: 'ArrayAccess', array: this.getVersion(expr.array), index: this.convertExpression(expr.index) };
-                    case 'Binary':
-                        return {
-                            type: 'Binary',
-                            op: expr.op,
-                            left: this.convertExpression(expr.left),
-                            right: this.convertExpression(expr.right)
-                        };
-                }
-            }
-
-            unrollWhile(whileStmt, depth) {
-                const condition = this.convertExpression(whileStmt.condition);
-                for (let i = 0; i < depth; i++) {
-                    const originalVersions = new Map(this.varVersions);
-                    this.statements.push({ type: 'Assume', condition });
-                    this.convertStatements(whileStmt.body.statements, depth);
-                    this.varVersions = new Map(originalVersions);
-                }
-                this.statements.push({ type: 'Assume', condition: { type: 'Binary', op: '==', left: condition, right: { type: 'Constant', value: 0 } } });
-            }
-
-            unrollFor(forStmt, depth) {
-                this.convertStatement(forStmt.init, depth);
-                const condition = this.convertExpression(forStmt.condition);
-                for (let i = 0; i < depth; i++) {
-                    const originalVersions = new Map(this.varVersions);
-                    this.statements.push({ type: 'Assume', condition });
-                    this.convertStatements(forStmt.body.statements, depth);
-                    this.convertStatement(forStmt.update, depth);
-                    this.varVersions = new Map(originalVersions);
-                }
-                this.statements.push({ type: 'Assume', condition: { type: 'Binary', op: '==', left: condition, right: { type: 'Constant', value: 0 } } });
-            }
-        }
-
-        // SSA Optimizations
-        class SSAOptimizer {
-            optimize(ssa) {
-                let changed = true;
-                while (changed) {
-                    changed = false;
-                    changed |= this.constantPropagation(ssa);
-                    changed |= this.deadCodeElimination(ssa);
-                    changed |= this.commonSubexpressionElimination(ssa);
-                }
-                return ssa;
-            }
-
-            constantPropagation(ssa) {
-                const constants = new Map();
-                let changed = false;
-                for (let i = 0; i < ssa.statements.length; i++) {
-                    let stmt = ssa.statements[i];
-                    if (stmt.type === 'Assignment' && stmt.value.type === 'Constant') {
-                        constants.set(stmt.target, stmt.value.value);
-                    } else if (stmt.type === 'Assignment' && stmt.value.type === 'Binary') {
-                        const left = stmt.value.left.type === 'Variable' ? constants.get(stmt.value.left.name) : null;
-                        const right = stmt.value.right.type === 'Variable' ? constants.get(stmt.value.right.name) : null;
-                        if (left !== null && right !== null) {
-                            const result = this.evaluateBinary(stmt.value.op, left, right);
-                            if (result !== null) {
-                                ssa.statements[i] = { type: 'Assignment', target: stmt.target, value: { type: 'Constant', value: result } };
-                                constants.set(stmt.target, result);
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-                return changed;
-            }
-
-            evaluateBinary(op, left, right) {
-                switch (op) {
-                    case '+': return left + right;
-                    case '-': return left - right;
-                    case '*': return left * right;
-                    case '/': return right !== 0 ? Math.floor(left / right) : null;
-                    default: return null;
-                }
-            }
-
-            deadCodeElimination(ssa) {
-                const usedVars = new Set();
-                for (const stmt of ssa.statements) {
-                    if (stmt.type === 'Assert' || stmt.type === 'ArrayAssert') {
-                        this.collectUsedVars(stmt.condition, usedVars);
-                    }
-                    if (stmt.type === 'ArrayAssignment') {
-                        this.collectUsedVars(stmt.index, usedVars);
-                        this.collectUsedVars(stmt.value, usedVars);
-                    }
-                }
-                for (const phi of ssa.phiNodes) {
-                    usedVars.add(phi.target);
-                    phi.vars.forEach(v => usedVars.add(v));
-                }
-                let changed = false;
-                ssa.statements = ssa.statements.filter(stmt => {
-                    if (stmt.type === 'Assignment' && !usedVars.has(stmt.target)) {
-                        changed = true;
-                        return false;
-                    }
-                    return true;
-                });
-                return changed;
-            }
-
-            collectUsedVars(expr, usedVars) {
-                if (!expr) return;
-                if (expr.type === 'Variable') {
-                    usedVars.add(expr.name);
-                } else if (expr.type === 'ArrayAccess') {
-                    this.collectUsedVars(expr.index, usedVars);
-                } else if (expr.type === 'Binary') {
-                    this.collectUsedVars(expr.left, usedVars);
-                    this.collectUsedVars(expr.right, usedVars);
-                }
-            }
-
-            commonSubexpressionElimination(ssa) {
-                const exprMap = new Map();
-                let changed = false;
-                for (let i = 0; i < ssa.statements.length; i++) {
-                    const stmt = ssa.statements[i];
-                    if (stmt.type === 'Assignment' && stmt.value.type === 'Binary') {
-                        const exprKey = JSON.stringify(stmt.value);
-                        if (exprMap.has(exprKey)) {
-                            ssa.statements[i] = { type: 'Assignment', target: stmt.target, value: { type: 'Variable', name: exprMap.get(exprKey) } };
-                            changed = true;
-                        } else {
-                            exprMap.set(exprKey, stmt.target);
-                        }
-                    }
-                }
-                return changed;
-            }
-        }
-
-        // CFG Generation
-        class CFGGenerator {
-            generateCFG(ast) {
-                const nodes = [];
-                const edges = [];
-                let nodeId = 0;
-
-                function addNode(label) {
-                    nodes.push({ data: { id: `n${nodeId}`, label } });
-                    return `n${nodeId++}`;
-                }
-
-                function processStatements(statements, parentId, exitId) {
-                    let currentId = parentId;
-                    for (const stmt of statements) {
-                        const label = this.stmtToString(stmt);
-                        const newId = addNode(label);
-                        if (currentId) {
-                            edges.push({ data: { source: currentId, target: newId } });
-                        }
-                        currentId = newId;
-
-                        if (stmt.type === 'IfElse') {
-                            const thenId = addNode('Then');
-                            const elseId = stmt.elseBranch ? addNode('Else') : exitId;
-                            edges.push({ data: { source: currentId, target: thenId, label: 'true' } });
-                            edges.push({ data: { source: currentId, target: elseId, label: 'false' } });
-                            const thenExit = processStatements(stmt.thenBranch.statements, thenId, exitId);
-                            if (stmt.elseBranch) {
-                                const elseExit = processStatements(stmt.elseBranch.statements, elseId, exitId);
-                            }
-                            currentId = exitId;
-                        } else if (stmt.type === 'While' || stmt.type === 'For') {
-                            const bodyId = addNode('Body');
-                            edges.push({ data: { source: currentId, target: bodyId, label: 'true' } });
-                            edges.push({ data: { source: currentId, target: exitId, label: 'false' } });
-                            const bodyExit = processStatements(stmt.body.statements, bodyId, currentId);
-                        }
-                    }
-                    return currentId;
-                }
-
-                const entryId = addNode('Entry');
-                const exitId = addNode('Exit');
-                processStatements(ast.statements, entryId, exitId);
-                return { nodes, edges };
-            }
-
-            generateSSACFG(ssa) {
-                const nodes = [];
-                const edges = [];
-                let nodeId = 0;
-
-                function addNode(label) {
-                    nodes.push({ data: { id: `n${nodeId}`, label } });
-                    return `n${nodeId++}`;
-                }
-
-                const entryId = addNode('Entry');
-                let currentId = entryId;
-                const exitId = addNode('Exit');
-
-                for (const stmt of ssa.statements) {
-                    const label = this.stmtToString(stmt);
-                    const newId = addNode(label);
-                    edges.push({ data: { source: currentId, target: newId } });
-                    currentId = newId;
-                }
-
-                for (const phi of ssa.phiNodes) {
-                    const label = `${phi.target} = phi(${phi.vars.join(', ')})`;
-                    const phiId = addNode(label);
-                    edges.push({ data: { source: currentId, target: phiId } });
-                    currentId = phiId;
-                }
-
-                edges.push({ data: { source: currentId, target: exitId } });
-                return { nodes, edges };
-            }
-
-            stmtToString(stmt) {
-                switch (stmt.type) {
-                    case 'Assignment':
-                        return `${stmt.target} := ${this.exprToString(stmt.value)}`;
-                    case 'ArrayAssignment':
-                        return `${stmt.array}[${this.exprToString(stmt.index)}] := ${this.exprToString(stmt.value)}`;
-                    case 'Assert':
-                        return `assert(${this.exprToString(stmt.condition)})`;
-                    case 'ArrayAssert':
-                        return `assert(forall ${stmt.varName} in range(${this.exprToString(stmt.rangeEnd)}): ${this.exprToString(stmt.condition)})`;
-                    case 'Assume':
-                        return `assume(${this.exprToString(stmt.condition)})`;
-                    default:
-                        return JSON.stringify(stmt);
-                }
-            }
-
-            exprToString(expr) {
-                switch (expr.type) {
-                    case 'Constant':
-                        return expr.value.toString();
-                    case 'Variable':
-                        return expr.name;
-                    case 'ArrayAccess':
-                        return `${expr.array}[${this.exprToString(expr.index)}]`;
-                    case 'Binary':
-                        return `(${this.exprToString(expr.left)} ${expr.op} ${this.exprToString(expr.right)})`;
-                    default:
-                        return JSON.stringify(expr);
-                }
-            }
-        }
-
-        // SMT Generation and Z3 Integration
-        class SMTGenerator {
-            async verifyProgram(ssa, z3) {
-                const smt = this.generateSMT(ssa, true);
-                const ctx = new z3.Context();
-                const solver = new z3.Solver(ctx);
-                await z3.loadSMTLIBString(smt, solver);
-
-                const result = await solver.check();
-                let examples = [];
-                let counterexamples = [];
-
-                if (result === z3.sat) {
-                    const model = solver.model();
-                    examples.push(this.extractModel(model, ssa));
-                } else if (result === z3.unsat) {
-                    // Try to find counterexamples by negating assertion
-                    const negSmt = this.generateSMT(ssa, false);
-                    const negSolver = new z3.Solver(ctx);
-                    await z3.loadSMTLIBString(negSmt, negSolver);
-                    for (let i = 0; i < 2 && (await negSolver.check()) === z3.sat; i++) {
-                        const model = negSolver.model();
-                        counterexamples.push(this.extractModel(model, ssa));
-                        negSolver.add(ctx.not(model));
-                    }
-                }
-
-                ctx.delete();
-                return { result: result === z3.sat ? 'Satisfiable' : 'Unsatisfiable', examples, counterexamples, smt };
-            }
-
-            async checkEquivalence(ssa1, ssa2, z3) {
-                const smt = this.generateEquivalenceSMT(ssa1, ssa2);
-                const ctx = new z3.Context();
-                const solver = new z3.Solver(ctx);
-                await z3.loadSMTLIBString(smt, solver);
-
-                const result = await solver.check();
-                let examples = [];
-                let counterexamples = [];
-
-                if (result === z3.unsat) {
-                    examples.push({}); // Programs are equivalent
-                } else if (result === z3.sat) {
-                    for (let i = 0; i < 2 && (await solver.check()) === z3.sat; i++) {
-                        const model = solver.model();
-                        counterexamples.push(this.extractModel(model, { statements: [...ssa1.statements, ...ssa2.statements] }));
-                        solver.add(ctx.not(model));
-                    }
-                }
-
-                ctx.delete();
-                return { result: result === z3.unsat ? 'Equivalent' : 'Not Equivalent', examples, counterexamples, smt };
-            }
-
-            generateSMT(ssa, checkAssert) {
-                let smt = '(set-logic QF_LIA)\n';
-                const vars = new Set();
-                const collectVars = (expr) => {
-                    if (!expr) return;
-                    if (expr.type === 'Variable') vars.add(expr.name);
-                    if (expr.type === 'ArrayAccess') vars.add(expr.array);
-                    if (expr.type === 'Binary') {
-                        collectVars(expr.left);
-                        collectVars(expr.right);
-                    }
-                    if (expr.type === 'ArrayAccess') collectVars(expr.index);
-                };
-
-                for (const stmt of ssa.statements) {
-                    if (stmt.type === 'Assignment') collectVars(stmt.value);
-                    if (stmt.type === 'ArrayAssignment') {
-                        collectVars(stmt.index);
-                        collectVars(stmt.value);
-                    }
-                    if (stmt.type === 'Assert' || stmt.type === 'ArrayAssert' || stmt.type === 'Assume') {
-                        collectVars(stmt.condition);
-                        if (stmt.type === 'ArrayAssert') collectVars(stmt.rangeEnd);
-                    }
-                }
-                for (const phi of ssa.phiNodes) {
-                    vars.add(phi.target);
-                    phi.vars.forEach(v => vars.add(v));
-                }
-
-                vars.forEach(v => {
-                    if (v.startsWith('arr')) {
-                        smt += `(declare-fun ${v} () (Array Int Int))\n`;
-                    } else {
-                        smt += `(declare-const ${v} Int)\n`;
-                    }
-                });
-
-                for (const stmt of ssa.statements) {
-                    if (stmt.type === 'Assignment') {
-                        smt += `(assert (= ${stmt.target} ${this.exprToSMT(stmt.value)}))\n`;
-                    } else if (stmt.type === 'ArrayAssignment') {
-                        smt += `(assert (= ${stmt.array} (store ${stmt.array} ${this.exprToSMT(stmt.index)} ${this.exprToSMT(stmt.value)})))\n`;
-                    } else if (stmt.type === 'Assert' && checkAssert) {
-                        smt += `(assert ${this.exprToSMT(stmt.condition)})\n`;
-                    } else if (stmt.type === 'Assume') {
-                        smt += `(assert ${this.exprToSMT(stmt.condition)})\n`;
-                    } else if (stmt.type === 'ArrayAssert' && checkAssert) {
-                        smt += `(assert (forall ((i Int)) (=> (and (>= i 0) (< i ${this.exprToSMT(stmt.rangeEnd)})) ${this.exprToSMT(stmt.condition, { [stmt.varName]: { type: 'Variable', name: 'i' } })})))\n`;
-                    }
-                }
-
-                for (const phi of ssa.phiNodes) {
-                    smt += `(assert (= ${phi.target} (ite ${this.exprToSMT(phi.condition)} ${phi.vars[0]} ${phi.vars[1]})))\n`;
-                }
-
-                smt += '(check-sat)\n(get-model)\n';
-                return smt;
-            }
-
-            generateEquivalenceSMT(ssa1, ssa2) {
-                let smt = '(set-logic QF_LIA)\n';
-                const vars1 = new Set();
-                const vars2 = new Set();
-                const collectVars = (ssa, vars) => {
-                    for (const stmt of ssa.statements) {
-                        if (stmt.type === 'Assignment') this.collectVars(stmt.value, vars);
-                        if (stmt.type === 'ArrayAssignment') {
-                            this.collectVars(stmt.index, vars);
-                            this.collectVars(stmt.value, vars);
-                        }
-                        if (stmt.type === 'Assert' || stmt.type === 'ArrayAssert' || stmt.type === 'Assume') {
-                            this.collectVars(stmt.condition, vars);
-                            if (stmt.type === 'ArrayAssert') this.collectVars(stmt.rangeEnd, vars);
-                        }
-                    }
-                    for (const phi of ssa.phiNodes) {
-                        vars.add(phi.target);
-                        phi.vars.forEach(v => vars.add(v));
-                    }
-                };
-
-                collectVars(ssa1, vars1);
-                collectVars(ssa2, vars2);
-                const sharedVars = new Set([...vars1].filter(x => vars2.has(x)));
-                const uniqueVars1 = new Set([...vars1].filter(x => !vars2.has(x)));
-                const uniqueVars2 = new Set([...vars2].filter(x => !vars1.has(x)));
-
-                [...sharedVars, ...uniqueVars1, ...uniqueVars2].forEach(v => {
-                    if (v.startsWith('arr')) {
-                        smt += `(declare-fun ${v} () (Array Int Int))\n`;
-                    } else {
-                        smt += `(declare-const ${v} Int)\n`;
-                    }
-                });
-
-                for (const stmt of ssa1.statements) {
-                    if (stmt.type === 'Assignment') {
-                        smt += `(assert (= ${stmt.target} ${this.exprToSMT(stmt.value)}))\n`;
-                    } else if (stmt.type === 'ArrayAssignment') {
-                        smt += `(assert (= ${stmt.array} (store ${stmt.array} ${this.exprToSMT(stmt.index)} ${this.exprToSMT(stmt.value)})))\n`;
-                    } else if (stmt.type === 'Assume') {
-                        smt += `(assert ${this.exprToSMT(stmt.condition)})\n`;
-                    }
-                }
-
-                for (const stmt of ssa2.statements) {
-                    if (stmt.type === 'Assignment') {
-                        smt += `(assert (= ${stmt.target} ${this.exprToSMT(stmt.value)}))\n`;
-                    } else if (stmt.type === 'ArrayAssignment') {
-                        smt += `(assert (= ${stmt.array} (store ${stmt.array} ${this.exprToSMT(stmt.index)} ${this.exprToSMT(stmt.value)})))\n`;
-                    } else if (stmt.type === 'Assume') {
-                        smt += `(assert ${this.exprToSMT(stmt.condition)})\n`;
-                    }
-                }
-
-                for (const phi of ssa1.phiNodes) {
-                    smt += `(assert (= ${phi.target} (ite ${this.exprToSMT(phi.condition)} ${phi.vars[0]} ${phi.vars[1]})))\n`;
-                }
-                for (const phi of ssa2.phiNodes) {
-                    smt += `(assert (= ${phi.target} (ite ${this.exprToSMT(phi.condition)} ${phi.vars[0]} ${phi.vars[1]})))\n`;
-                }
-
-                const diffAssertions = [...sharedVars].map(v => {
-                    if (v.startsWith('arr')) {
-                        return `(exists ((i Int)) (and (>= i 0) (< i n) (not (= (select ${v} i) (select ${v} i)))))`;
-                    } else {
-                        return `(not (= ${v} ${v}))`;
-                    }
-                }).join(' ');
-
-                smt += `(assert (or ${diffAssertions}))\n`;
-                smt += '(check-sat)\n(get-model)\n';
-                return smt;
-            }
-
-            collectVars(expr, vars) {
-                if (!expr) return;
-                if (expr.type === 'Variable') vars.add(expr.name);
-                if (expr.type === 'ArrayAccess') vars.add(expr.array);
-                if (expr.type === 'Binary') {
-                    this.collectVars(expr.left, vars);
-                    this.collectVars(expr.right, vars);
-                }
-                if (expr.type === 'ArrayAccess') this.collectVars(expr.index, vars);
-            }
-
-            exprToSMT(expr, varMap = {}) {
-                if (!expr) return '';
-                if (expr.type === 'Constant') return expr.value.toString();
-                if (expr.type === 'Variable') return varMap[expr.name]?.name || expr.name;
-                if (expr.type === 'ArrayAccess') return `(select ${expr.array} ${this.exprToSMT(expr.index)})`;
-                if (expr.type === 'Binary') {
-                    const left = this.exprToSMT(expr.left, varMap);
-                    const right = this.exprToSMT(expr.right, varMap);
-                    return `(${expr.op === '==' ? '=' : expr.op} ${left} ${right})`;
-                }
-                return '';
-            }
-
-            extractModel(model, ssa) {
-                const result = {};
-                const vars = new Set();
-                for (const stmt of ssa.statements) {
-                    if (stmt.type === 'Assignment') vars.add(stmt.target);
-                    if (stmt.type === 'ArrayAssignment') vars.add(stmt.array);
-                    if (stmt.type === 'Assert' || stmt.type === 'ArrayAssert' || stmt.type === 'Assume') {
-                        this.collectVars(stmt.condition, vars);
-                        if (stmt.type === 'ArrayAssert') this.collectVars(stmt.rangeEnd, vars);
-                    }
-                }
-                for (const phi of ssa.phiNodes) {
-                    vars.add(phi.target);
-                    phi.vars.forEach(v => vars.add(v));
-                }
-                vars.forEach(v => {
-                    const value = model.eval(v);
-                    if (value) {
-                        if (v.startsWith('arr')) {
-                            result[v] = 'Array';
-                        } else {
-                            result[v] = value.toString();
-                        }
-                    }
-                });
-                return result;
-            }
-        }
-
-        // React Component
         function App() {
             const [mode, setMode] = useState('Verification');
-            const [program1, setProgram1] = useState('');
+            const [program1, setProgram1] = useState('x := 3;\nif (x < 5) {\n    y := x + 1;\n} else {\n    y := x - 1;\n}\nassert(y > 0);');
             const [program2, setProgram2] = useState('');
             const [unrollDepth, setUnrollDepth] = useState(3);
             const [result, setResult] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
 
             useEffect(() => {
-                if (result) {
-                    // Render CFGs
-                    const cfgGen = new CFGGenerator();
-                    const ast1 = new Parser(program1).parseProgram();
-                    const cfg1 = cfgGen.generateCFG(ast1);
-                    cytoscape({
-                        container: document.getElementById('cfg-original'),
-                        elements: [...cfg1.nodes, ...cfg1.edges],
-                        style: [
-                            { selector: 'node', style: { 'label': 'data(label)', 'shape': 'rectangle', 'text-wrap': 'wrap' } },
-                            { selector: 'edge', style: { 'label': 'data(label)', 'curve-style': 'bezier' } }
-                        ],
-                        layout: { name: 'dagre' }
-                    });
+                if (result && !error) {
+                    try {
+                        const cfgGen = new CFGGenerator();
+                        const ast1 = new Parser(program1).parseProgram();
+                        const cfg1 = cfgGen.generateCFG(ast1);
+                        
+                        const cy1 = cytoscape({
+                            container: document.getElementById('cfg-original'),
+                            elements: [...cfg1.nodes, ...cfg1.edges],
+                            style: [
+                                {
+                                    selector: 'node',
+                                    style: {
+                                        'label': 'data(label)',
+                                        'text-wrap': 'wrap',
+                                        'text-max-width': '100px',
+                                        'background-color': '#fff',
+                                        'border-width': 1,
+                                        'border-color': '#000',
+                                        'padding': '10px'
+                                    }
+                                },
+                                {
+                                    selector: 'edge',
+                                    style: {
+                                        'label': 'data(label)',
+                                        'curve-style': 'bezier',
+                                        'target-arrow-shape': 'triangle',
+                                        'arrow-scale': 1.5,
+                                        'line-color': '#666',
+                                        'target-arrow-color': '#666'
+                                    }
+                                }
+                            ],
+                            layout: {
+                                name: 'dagre',
+                                rankDir: 'TB',
+                                nodeSep: 50,
+                                rankSep: 100
+                            }
+                        });
 
-                    const ssaConverter = new SSAConverter();
-                    const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
-                    const optimizedSsa1 = new SSAOptimizer().optimize({ ...ssa1 });
-                    const ssaCfg1 = cfgGen.generateSSACFG(optimizedSsa1);
-                    cytoscape({
-                        container: document.getElementById('cfg-ssa'),
-                        elements: [...ssaCfg1.nodes, ...ssaCfg1.edges],
-                        style: [
-                            { selector: 'node', style: { 'label': 'data(label)', 'shape': 'rectangle', 'text-wrap': 'wrap' } },
-                            { selector: 'edge', style: { 'label': 'data(label)', 'curve-style': 'bezier' } }
-                        ],
-                        layout: { name: 'dagre' }
-                    });
+                        const ssaConverter = new SSAConverter();
+                        const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
+                        const optimizedSsa1 = new SSAOptimizer().optimize({ ...ssa1 });
+                        const ssaCfg1 = cfgGen.generateSSACFG(optimizedSsa1);
+                        
+                        const cy2 = cytoscape({
+                            container: document.getElementById('cfg-ssa'),
+                            elements: [...ssaCfg1.nodes, ...ssaCfg1.edges],
+                            style: [
+                                {
+                                    selector: 'node',
+                                    style: {
+                                        'label': 'data(label)',
+                                        'text-wrap': 'wrap',
+                                        'text-max-width': '100px',
+                                        'background-color': '#fff',
+                                        'border-width': 1,
+                                        'border-color': '#000',
+                                        'padding': '10px'
+                                    }
+                                },
+                                {
+                                    selector: 'edge',
+                                    style: {
+                                        'label': 'data(label)',
+                                        'curve-style': 'bezier',
+                                        'target-arrow-shape': 'triangle',
+                                        'arrow-scale': 1.5,
+                                        'line-color': '#666',
+                                        'target-arrow-color': '#666'
+                                    }
+                                }
+                            ],
+                            layout: {
+                                name: 'dagre',
+                                rankDir: 'TB',
+                                nodeSep: 50,
+                                rankSep: 100
+                            }
+                        });
+
+                        // Fit the graphs to the container
+                        cy1.fit();
+                        cy2.fit();
+                    } catch (e) {
+                        console.error('Error rendering CFGs:', e);
+                        setError('Failed to render control flow graphs: ' + e.message);
+                    }
                 }
             }, [result]);
 
             const handleSubmit = async () => {
-    try {
-        const parser = new Parser(program1);
-        const ast1 = parser.parseProgram();
-        const ssaConverter = new SSAConverter();
-        const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
-        const optimizer = new SSAOptimizer();
-        const optimizedSsa1 = optimizer.optimize({ ...ssa1 });
-        const smtGen = new SMTGenerator();
+                setLoading(true);
+                setError(null);
+                setResult(null);
 
-        if (mode === 'Verification') {
-            const z3 = await Z3.init();
-            const verificationResult = await smtGen.verifyProgram(optimizedSsa1, z3);
-            setResult({
-                original: program1,
-                ssa: ssa1,
-                optimizedSsa: optimizedSsa1,
-                ...verificationResult
-            });
-        } else {
-            const parser2 = new Parser(program2);
-            const ast2 = parser2.parseProgram();
-            const ssa2 = ssaConverter.convertProgram(ast2, unrollDepth);
-            const optimizedSsa2 = optimizer.optimize({ ...ssa2 });
-            const z3 = await Z3.init();
-            const equivalenceResult = await smtGen.checkEquivalence(optimizedSsa1, optimizedSsa2, z3);
-            setResult({
-                original: [program1, program2],
-                ssa: [ssa1, ssa2],
-                optimizedSsa: [optimizedSsa1, optimizedSsa2],
-                ...equivalenceResult
-            });
-        }
-    } catch (e) {
-        console.error('Analysis Error:', e);
-        setResult({ error: `Analysis failed: ${e.message}` });
-    }
-};
+                try {
+                    const parser = new Parser(program1);
+                    const ast1 = parser.parseProgram();
+                    const ssaConverter = new SSAConverter();
+                    const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
+                    const optimizer = new SSAOptimizer();
+                    const optimizedSsa1 = optimizer.optimize({ ...ssa1 });
+                    const smtGen = new SMTGenerator();
+
+                    if (mode === 'Verification') {
+                        const z3 = await Z3.init();
+                        const verificationResult = await smtGen.verifyProgram(optimizedSsa1, z3);
+                        setResult({
+                            original: program1,
+                            ssa: ssa1,
+                            optimizedSsa: optimizedSsa1,
+                            ...verificationResult
+                        });
+                    } else {
+                        const parser2 = new Parser(program2);
+                        const ast2 = parser2.parseProgram();
+                        const ssa2 = ssaConverter.convertProgram(ast2, unrollDepth);
+                        const optimizedSsa2 = optimizer.optimize({ ...ssa2 });
+                        const z3 = await Z3.init();
+                        const equivalenceResult = await smtGen.checkEquivalence(optimizedSsa1, optimizedSsa2, z3);
+                        setResult({
+                            original: [program1, program2],
+                            ssa: [ssa1, ssa2],
+                            optimizedSsa: [optimizedSsa1, optimizedSsa2],
+                            ...equivalenceResult
+                        });
+                    }
+                } catch (e) {
+                    console.error('Analysis Error:', e);
+                    setError(`Analysis failed: ${e.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
 
             const renderSSA = (ssa) => {
                 return ssa.statements.map((stmt, i) => (
-                    <div key={i}>{new CFGGenerator().stmtToString(stmt)}</div>
+                    <div key={i} className="mb-1">{new CFGGenerator().stmtToString(stmt)}</div>
                 )).concat(ssa.phiNodes.map((phi, i) => (
-                    <div key={`phi${i}`}>{`${phi.target} = phi(${phi.vars.join(', ')})`}</div>
+                    <div key={`phi${i}`} className="mb-1">{`${phi.target} = phi(${phi.vars.join(', ')})`}</div>
                 )));
             };
 
             return (
-                <div className="container mx-auto p-4">
-                    <h1 className="text-2xl font-bold mb-4">Program Analysis Tool</h1>
-                    <div className="mb-4">
-                        <label className="block">Mode:</label>
-                        <select
-                            value={mode}
-                            onChange={(e) => setMode(e.target.value)}
-                            className="border p-2"
-                        >
-                            <option value="Verification">Verification</option>
-                            <option value="Equivalence">Equivalence</option>
-                        </select>
+                <div className="container mx-auto p-6 max-w-6xl">
+                    <h1 className="text-3xl font-bold mb-6 text-gray-800">Program Analysis Tool</h1>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div className="bg-white p-6 rounded-lg shadow-sm">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Mode:</label>
+                            <select
+                                value={mode}
+                                onChange={(e) => setMode(e.target.value)}
+                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            >
+                                <option value="Verification">Verification</option>
+                                <option value="Equivalence">Equivalence</option>
+                            </select>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-lg shadow-sm">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Unrolling Depth:</label>
+                            <input
+                                type="number"
+                                value={unrollDepth}
+                                onChange={(e) => setUnrollDepth(parseInt(e.target.value))}
+                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                min="1"
+                            />
+                        </div>
                     </div>
-                    <div className="mb-4">
-                        <label className="block">Unrolling Depth:</label>
-                        <input
-                            type="number"
-                            value={unrollDepth}
-                            onChange={(e) => setUnrollDepth(parseInt(e.target.value))}
-                            className="border p-2"
-                            min="1"
-                        />
-                    </div>
-                    <div className="mb-4">
-                        <label className="block">Program 1:</label>
+
+                    <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Program 1:</label>
                         <textarea
                             value={program1}
                             onChange={(e) => setProgram1(e.target.value)}
-                            className="border p-2 w-full h-40"
+                            className="w-full border border-gray-300 rounded-md shadow-sm p-2 h-48 font-mono focus:ring-indigo-500 focus:border-indigo-500"
+                            placeholder="Enter your program here..."
                         />
                     </div>
+
                     {mode === 'Equivalence' && (
-                        <div className="mb-4">
-                            <label className="block">Program 2:</label>
+                        <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Program 2:</label>
                             <textarea
                                 value={program2}
                                 onChange={(e) => setProgram2(e.target.value)}
-                                className="border p-2 w-full h-40"
+                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 h-48 font-mono focus:ring-indigo-500 focus:border-indigo-500"
+                                placeholder="Enter the second program here..."
                             />
                         </div>
                     )}
+
                     <button
                         onClick={handleSubmit}
-                        className="bg-blue-500 text-white p-2 rounded"
+                        disabled={loading}
+                        className={`w-full bg-indigo-600 text-white p-3 rounded-md font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
                     >
-                        Analyze
+                        {loading ? 'Analyzing...' : 'Analyze'}
                     </button>
-                    {result && (
-                        <div className="mt-4">
-                            {result.error ? (
-                                <div className="text-red-500">{result.error}</div>
-                            ) : (
-                                <>
-                                    <h2 className="text-xl font-bold">Results</h2>
-                                    <div className="mb-4">
-                                        <h3>Original Program{mode === 'Equivalence' ? 's' : ''}</h3>
-                                        <pre className="code-block">
-                                            {mode === 'Equivalence' ? result.original.join('\n\n') : result.original}
-                                        </pre>
-                                    </div>
-                                    <div className="mb-4">
-                                        <h3>SSA Form</h3>
-                                        <div className="flex">
-                                            <div className="w-1/2">
-                                                <h4>Unoptimized</h4>
-                                                <pre className="code-block">
-                                                    {mode === 'Equivalence' ? (
-                                                        <>
-                                                            <div>Program 1:</div>
-                                                            {renderSSA(result.ssa[0])}
-                                                            <div>Program 2:</div>
-                                                            {renderSSA(result.ssa[1])}
-                                                        </>
-                                                    ) : renderSSA(result.ssa)}
-                                                </pre>
-                                            </div>
-                                            <div className="w-1/2">
-                                                <h4>Optimized</h4>
-                                                <pre className="code-block">
-                                                    {mode === 'Equivalence' ? (
-                                                        <>
-                                                            <div>Program 1:</div>
-                                                            {renderSSA(result.optimizedSsa[0])}
-                                                            <div>Program 2:</div>
-                                                            {renderSSA(result.optimizedSsa[1])}
-                                                        </>
-                                                    ) : renderSSA(result.optimizedSsa)}
-                                                </pre>
-                                            </div>
+
+                    {loading && (
+                        <div className="loading mt-6">
+                            <div className="loading-spinner"></div>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="mt-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+                            {error}
+                        </div>
+                    )}
+
+                    {result && !error && (
+                        <div className="mt-6 space-y-6">
+                            <div className="bg-white p-6 rounded-lg shadow-sm">
+                                <h2 className="text-xl font-semibold mb-4 text-gray-800">Analysis Results</h2>
+                                
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Original Program{mode === 'Equivalence' ? 's' : ''}</h3>
+                                    <pre className="code-block">
+                                        {mode === 'Equivalence' ? result.original.join('\n\n=== Program 2 ===\n\n') : result.original}
+                                    </pre>
+                                </div>
+
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">SSA Form</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <h4 className="font-medium mb-2 text-gray-600">Unoptimized</h4>
+                                            <pre className="code-block">
+                                                {mode === 'Equivalence' ? (
+                                                    <>
+                                                        <div className="font-medium">Program 1:</div>
+                                                        {renderSSA(result.ssa[0])}
+                                                        <div className="font-medium mt-4">Program 2:</div>
+                                                        {renderSSA(result.ssa[1])}
+                                                    </>
+                                                ) : renderSSA(result.ssa)}
+                                            </pre>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-medium mb-2 text-gray-600">Optimized</h4>
+                                            <pre className="code-block">
+                                                {mode === 'Equivalence' ? (
+                                                    <>
+                                                        <div className="font-medium">Program 1:</div>
+                                                        {renderSSA(result.optimizedSsa[0])}
+                                                        <div className="font-medium mt-4">Program 2:</div>
+                                                        {renderSSA(result.optimizedSsa[1])}
+                                                    </>
+                                                ) : renderSSA(result.optimizedSsa)}
+                                            </pre>
                                         </div>
                                     </div>
-                                    <div className="mb-4">
-                                        <h3>SMT Constraints</h3>
-                                        <pre className="code-block">{result.smt}</pre>
-                                    </div>
-                                    <div className="mb-4">
-                                        <h3>Control Flow Graphs</h3>
-                                        <div className="flex">
-                                            <div className="w-1/2">
-                                                <h4>Original CFG</h4>
-                                                <div id="cfg-original"></div>
-                                            </div>
-                                            <div className="w-1/2">
-                                                <h4>SSA CFG</h4>
-                                                <div id="cfg-ssa"></div>
-                                            </div>
+                                </div>
+
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">SMT Constraints</h3>
+                                    <pre className="code-block overflow-x-auto">{result.smt}</pre>
+                                </div>
+
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Control Flow Graphs</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <h4 className="font-medium mb-2 text-gray-600">Original CFG</h4>
+                                            <div id="cfg-original"></div>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-medium mb-2 text-gray-600">SSA CFG</h4>
+                                            <div id="cfg-ssa"></div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <h3>Result: {result.result}</h3>
-                                        {result.examples.length > 0 && (
-                                            <div>
-                                                <h4>Example(s):</h4>
-                                                {result.examples.map((ex, i) => (
-                                                    <pre key={i} className="code-block">
-                                                        {JSON.stringify(ex, null, 2)}
-                                                    </pre>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {result.counterexamples.length > 0 && (
-                                            <div>
-                                                <h4>Counterexample(s):</h4>
-                                                {result.counterexamples.map((cex, i) => (
-                                                    <pre key={i} className="code-block">
-                                                        {JSON.stringify(cex, null, 2)}
-                                                    </pre>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </>
-                            )}
+                                </div>
+
+                                <div>
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">
+                                        Result: <span className={result.result === 'Satisfiable' || result.result === 'Equivalent' ? 'text-green-600' : 'text-red-600'}>
+                                            {result.result}
+                                        </span>
+                                    </h3>
+                                    
+                                    {result.examples.length > 0 && (
+                                        <div className="mb-4">
+                                            <h4 className="font-medium mb-2 text-gray-600">Example(s):</h4>
+                                            {result.examples.map((ex, i) => (
+                                                <pre key={i} className="code-block">
+                                                    {JSON.stringify(ex, null, 2)}
+                                                </pre>
+                                            ))}
+                                        </div>
+                                    )}
+                                    
+                                    {result.counterexamples.length > 0 && (
+                                        <div>
+                                            <h4 className="font-medium mb-2 text-gray-600">Counterexample(s):</h4>
+                                            {result.counterexamples.map((cex, i) => (
+                                                <pre key={i} className="code-block">
+                                                    {JSON.stringify(cex, null, 2)}
+                                                </pre>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
