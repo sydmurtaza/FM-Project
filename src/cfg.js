@@ -112,4 +112,5 @@ class CFGGenerator {
     }
 }
 
-export default CFGGenerator;
+// Make it available globally (guarded)
+if (!window.CFGGenerator) window.CFGGenerator = CFGGenerator;

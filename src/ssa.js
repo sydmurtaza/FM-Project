@@ -263,4 +263,6 @@ class SSAOptimizer {
     }
 }
 
-export { SSAConverter, SSAOptimizer };
+// Make them available globally (guarded)
+if (!window.SSAConverter) window.SSAConverter = SSAConverter;
+if (!window.SSAOptimizer) window.SSAOptimizer = SSAOptimizer;

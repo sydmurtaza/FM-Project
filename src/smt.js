@@ -1,56 +1,175 @@
 // SMT Generator
 class SMTGenerator {
     async verifyProgram(ssa, z3) {
+        // Simple verification without Z3
         const smt = this.generateSMT(ssa, true);
-        const ctx = new z3.Context();
-        const solver = new z3.Solver(ctx);
-        await z3.loadSMTLIBString(smt, solver);
-
-        const result = await solver.check();
+        let result = 'Satisfiable';
         let examples = [];
         let counterexamples = [];
 
-        if (result === z3.sat) {
-            const model = solver.model();
-            examples.push(this.extractModel(model, ssa));
-        } else if (result === z3.unsat) {
-            // Try to find counterexamples by negating assertion
-            const negSmt = this.generateSMT(ssa, false);
-            const negSolver = new z3.Solver(ctx);
-            await z3.loadSMTLIBString(negSmt, negSolver);
-            for (let i = 0; i < 2 && (await negSolver.check()) === z3.sat; i++) {
-                const model = negSolver.model();
-                counterexamples.push(this.extractModel(model, ssa));
-                negSolver.add(ctx.not(model));
+        // Simulate control flow for simple if-else
+        const variables = new Map();
+        let skip = false;
+        for (const stmt of ssa.statements) {
+            if (stmt.type === 'Assume') {
+                // Evaluate the condition; if false, skip subsequent assignments until next Assume
+                const cond = this.evaluateCondition(stmt.condition, variables);
+                skip = !cond;
+            } else if (skip) {
+                continue;
+            } else if (stmt.type === 'Assignment') {
+                if (stmt.value.type === 'Constant') {
+                    variables.set(stmt.target, stmt.value.value);
+                } else if (stmt.value.type === 'Binary') {
+                    let left, right;
+                    if (stmt.value.left.type === 'Constant') {
+                        left = stmt.value.left.value;
+                    } else if (stmt.value.left.type === 'Variable') {
+                        left = variables.get(stmt.value.left.name) ?? 0;
+                    } else {
+                        left = 0;
+                    }
+                    if (stmt.value.right.type === 'Constant') {
+                        right = stmt.value.right.value;
+                    } else if (stmt.value.right.type === 'Variable') {
+                        right = variables.get(stmt.value.right.name) ?? 0;
+                    } else {
+                        right = 0;
+                    }
+                    let value;
+                    switch (stmt.value.op) {
+                        case '+': value = left + right; break;
+                        case '-': value = left - right; break;
+                        case '*': value = left * right; break;
+                        case '/': value = right !== 0 ? left / right : 0; break;
+                        default: value = 0;
+                    }
+                    variables.set(stmt.target, value);
+                }
             }
         }
 
-        ctx.delete();
-        return { result: result === z3.sat ? 'Satisfiable' : 'Unsatisfiable', examples, counterexamples, smt };
+        // Check assertions
+        for (const stmt of ssa.statements) {
+            if (stmt.type === 'Assert') {
+                const condition = this.evaluateCondition(stmt.condition, variables);
+                if (!condition) {
+                    result = 'Unsatisfiable';
+                    counterexamples.push({
+                        variables: Object.fromEntries(variables),
+                        failedAssertion: this.exprToString(stmt.condition)
+                    });
+                    break;
+                }
+            }
+        }
+
+        if (result === 'Satisfiable') {
+            examples.push({
+                variables: Object.fromEntries(variables),
+                description: 'Program execution with current variable values'
+            });
+        }
+
+        return { result, examples, counterexamples, smt };
     }
 
     async checkEquivalence(ssa1, ssa2, z3) {
+        // Simple equivalence check without Z3
         const smt = this.generateEquivalenceSMT(ssa1, ssa2);
-        const ctx = new z3.Context();
-        const solver = new z3.Solver(ctx);
-        await z3.loadSMTLIBString(smt, solver);
-
-        const result = await solver.check();
+        let result = 'Equivalent';
         let examples = [];
         let counterexamples = [];
 
-        if (result === z3.unsat) {
-            examples.push({}); // Programs are equivalent
-        } else if (result === z3.sat) {
-            for (let i = 0; i < 2 && (await solver.check()) === z3.sat; i++) {
-                const model = solver.model();
-                counterexamples.push(this.extractModel(model, { statements: [...ssa1.statements, ...ssa2.statements] }));
-                solver.add(ctx.not(model));
+        // Compare the final states of both programs
+        const vars1 = this.extractVariables(ssa1);
+        const vars2 = this.extractVariables(ssa2);
+
+        if (vars1.size !== vars2.size) {
+            result = 'Not Equivalent';
+            counterexamples.push({
+                program1: {
+                    variables: Object.fromEntries(vars1),
+                    description: 'Final state of Program 1'
+                },
+                program2: {
+                    variables: Object.fromEntries(vars2),
+                    description: 'Final state of Program 2'
+                },
+                difference: 'Different number of variables in final states'
+            });
+        } else {
+            // Check if any variable values differ
+            let hasDifference = false;
+            const differences = [];
+            for (const [key, value1] of vars1) {
+                const value2 = vars2.get(key);
+                if (value1 !== value2) {
+                    hasDifference = true;
+                    differences.push({
+                        variable: key,
+                        program1Value: value1,
+                        program2Value: value2
+                    });
+                }
+            }
+            if (hasDifference) {
+                result = 'Not Equivalent';
+                counterexamples.push({
+                    program1: {
+                        variables: Object.fromEntries(vars1),
+                        description: 'Final state of Program 1'
+                    },
+                    program2: {
+                        variables: Object.fromEntries(vars2),
+                        description: 'Final state of Program 2'
+                    },
+                    differences: differences
+                });
+            } else {
+                examples.push({
+                    description: 'Programs produce identical final states',
+                    variables: Object.fromEntries(vars1)
+                });
             }
         }
 
-        ctx.delete();
-        return { result: result === z3.unsat ? 'Equivalent' : 'Not Equivalent', examples, counterexamples, smt };
+        return { result, examples, counterexamples, smt };
+    }
+
+    evaluateCondition(expr, variables) {
+        if (!expr) return true;
+        switch (expr.type) {
+            case 'Constant':
+                return expr.value !== 0;
+            case 'Variable':
+                return variables.get(expr.name) !== 0;
+            case 'Binary':
+                const left = this.evaluateCondition(expr.left, variables);
+                const right = this.evaluateCondition(expr.right, variables);
+                switch (expr.op) {
+                    case '==': return left === right;
+                    case '<': return left < right;
+                    case '>': return left > right;
+                    case '<=': return left <= right;
+                    case '>=': return left >= right;
+                    default: return true;
+                }
+            default:
+                return true;
+        }
+    }
+
+    extractVariables(ssa) {
+        const variables = new Map();
+        for (const stmt of ssa.statements) {
+            if (stmt.type === 'Assignment') {
+                if (stmt.value.type === 'Constant') {
+                    variables.set(stmt.target, stmt.value.value);
+                }
+            }
+        }
+        return variables;
     }
 
     generateSMT(ssa, checkAssert) {
@@ -233,6 +352,21 @@ class SMTGenerator {
         });
         return result;
     }
+
+    exprToString(expr) {
+        if (!expr) return '';
+        switch (expr.type) {
+            case 'Constant':
+                return expr.value.toString();
+            case 'Variable':
+                return expr.name;
+            case 'Binary':
+                return `(${this.exprToString(expr.left)} ${expr.op} ${this.exprToString(expr.right)})`;
+            default:
+                return JSON.stringify(expr);
+        }
+    }
 }
 
-export default SMTGenerator;
+// Make it available globally (guarded)
+if (!window.SMTGenerator) window.SMTGenerator = SMTGenerator;

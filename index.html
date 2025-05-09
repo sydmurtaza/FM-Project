@@ -4,59 +4,60 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Analysis Tool</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
+    <!-- Add React and ReactDOM -->
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <!-- Add Cytoscape and Dagre -->
+    <script src="https://unpkg.com/cytoscape@3.19.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <!-- Add Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.25.0/cytoscape.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/z3-solver@4.12.2/build/z3.js"></script>
-    <style>
-        .code-block {
-            background: #f4f4f4;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 15px;
-            font-family: 'Courier New', monospace;
-            white-space: pre-wrap;
-            margin: 10px 0;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        #cfg-original, #cfg-ssa {
-            height: 400px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin: 10px 0;
-            background: #fff;
-        }
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100px;
-        }
-        .loading-spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
+    <!-- Add Framer Motion for animations -->
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <!-- Add custom fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Add Tippy.js for tooltips -->
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <!-- Load modules first -->
+    <script src="src/parser.js"></script>
+    <script src="src/cfg.js"></script>
+    <script src="src/ssa.js"></script>
+    <script src="src/smt.js"></script>
+    <link rel="stylesheet" href="src/styles.css">
 </head>
-<body class="bg-gray-50">
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+<body>
+    <div class="background-grid"></div>
+    <div class="background-glow"></div>
+    <div class="cyber-lines" id="cyberLines"></div>
+    <div class="floating-particles" id="particles"></div>
 
-        // ... [Previous class implementations remain unchanged]
+    <div class="app-container">
+        <main class="main-content">
+            <header class="header">
+                <div class="flex items-center justify-between w-full">
+                    <h2 class="text-xl font-semibold">Program Analysis Tool</h2>
+                    <div class="flex items-center space-x-4">
+                        <button class="btn-primary">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            Reset
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-wrapper">
+                <div id="root"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- All other scripts should come before this -->
+    <script>
+        const { useState, useEffect } = React;
 
         function App() {
             const [mode, setMode] = useState('Verification');
@@ -66,118 +67,46 @@
             const [result, setResult] = useState(null);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
+            const [activeTab, setActiveTab] = useState('analysis');
 
             useEffect(() => {
-                if (result && !error) {
-                    try {
-                        const cfgGen = new CFGGenerator();
-                        const ast1 = new Parser(program1).parseProgram();
-                        const cfg1 = cfgGen.generateCFG(ast1);
-                        
-                        const cy1 = cytoscape({
-                            container: document.getElementById('cfg-original'),
-                            elements: [...cfg1.nodes, ...cfg1.edges],
-                            style: [
-                                {
-                                    selector: 'node',
-                                    style: {
-                                        'label': 'data(label)',
-                                        'text-wrap': 'wrap',
-                                        'text-max-width': '100px',
-                                        'background-color': '#fff',
-                                        'border-width': 1,
-                                        'border-color': '#000',
-                                        'padding': '10px'
-                                    }
-                                },
-                                {
-                                    selector: 'edge',
-                                    style: {
-                                        'label': 'data(label)',
-                                        'curve-style': 'bezier',
-                                        'target-arrow-shape': 'triangle',
-                                        'arrow-scale': 1.5,
-                                        'line-color': '#666',
-                                        'target-arrow-color': '#666'
-                                    }
-                                }
-                            ],
-                            layout: {
-                                name: 'dagre',
-                                rankDir: 'TB',
-                                nodeSep: 50,
-                                rankSep: 100
-                            }
-                        });
+                const handleTabChange = (event) => {
+                    setActiveTab(event.detail.tab);
+                };
+                window.addEventListener('tabChange', handleTabChange);
+                return () => window.removeEventListener('tabChange', handleTabChange);
+            }, []);
 
-                        const ssaConverter = new SSAConverter();
-                        const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
-                        const optimizedSsa1 = new SSAOptimizer().optimize({ ...ssa1 });
-                        const ssaCfg1 = cfgGen.generateSSACFG(optimizedSsa1);
-                        
-                        const cy2 = cytoscape({
-                            container: document.getElementById('cfg-ssa'),
-                            elements: [...ssaCfg1.nodes, ...ssaCfg1.edges],
-                            style: [
-                                {
-                                    selector: 'node',
-                                    style: {
-                                        'label': 'data(label)',
-                                        'text-wrap': 'wrap',
-                                        'text-max-width': '100px',
-                                        'background-color': '#fff',
-                                        'border-width': 1,
-                                        'border-color': '#000',
-                                        'padding': '10px'
-                                    }
-                                },
-                                {
-                                    selector: 'edge',
-                                    style: {
-                                        'label': 'data(label)',
-                                        'curve-style': 'bezier',
-                                        'target-arrow-shape': 'triangle',
-                                        'arrow-scale': 1.5,
-                                        'line-color': '#666',
-                                        'target-arrow-color': '#666'
-                                    }
-                                }
-                            ],
-                            layout: {
-                                name: 'dagre',
-                                rankDir: 'TB',
-                                nodeSep: 50,
-                                rankSep: 100
-                            }
-                        });
-
-                        // Fit the graphs to the container
-                        cy1.fit();
-                        cy2.fit();
-                    } catch (e) {
-                        console.error('Error rendering CFGs:', e);
-                        setError('Failed to render control flow graphs: ' + e.message);
-                    }
+            useEffect(() => {
+                if (typeof tippy !== 'undefined') {
+                    tippy('[data-tippy-content]', {
+                        theme: 'dark',
+                        animation: 'scale',
+                        duration: [200, 200],
+                    });
                 }
-            }, [result]);
+            }, [activeTab]);
 
             const handleSubmit = async () => {
                 setLoading(true);
                 setError(null);
                 setResult(null);
-
+                console.log('Analyze button clicked');
                 try {
+                    console.log('Parsing program1:', program1);
                     const parser = new Parser(program1);
                     const ast1 = parser.parseProgram();
+                    console.log('AST1:', ast1);
                     const ssaConverter = new SSAConverter();
                     const ssa1 = ssaConverter.convertProgram(ast1, unrollDepth);
+                    console.log('SSA1:', ssa1);
                     const optimizer = new SSAOptimizer();
                     const optimizedSsa1 = optimizer.optimize({ ...ssa1 });
+                    console.log('Optimized SSA1:', optimizedSsa1);
                     const smtGen = new SMTGenerator();
-
                     if (mode === 'Verification') {
-                        const z3 = await Z3.init();
-                        const verificationResult = await smtGen.verifyProgram(optimizedSsa1, z3);
+                        const verificationResult = await smtGen.verifyProgram(optimizedSsa1);
+                        console.log('Verification result:', verificationResult);
                         setResult({
                             original: program1,
                             ssa: ssa1,
@@ -185,12 +114,16 @@
                             ...verificationResult
                         });
                     } else {
+                        console.log('Parsing program2:', program2);
                         const parser2 = new Parser(program2);
                         const ast2 = parser2.parseProgram();
+                        console.log('AST2:', ast2);
                         const ssa2 = ssaConverter.convertProgram(ast2, unrollDepth);
+                        console.log('SSA2:', ssa2);
                         const optimizedSsa2 = optimizer.optimize({ ...ssa2 });
-                        const z3 = await Z3.init();
-                        const equivalenceResult = await smtGen.checkEquivalence(optimizedSsa1, optimizedSsa2, z3);
+                        console.log('Optimized SSA2:', optimizedSsa2);
+                        const equivalenceResult = await smtGen.checkEquivalence(optimizedSsa1, optimizedSsa2);
+                        console.log('Equivalence result:', equivalenceResult);
                         setResult({
                             original: [program1, program2],
                             ssa: [ssa1, ssa2],
@@ -207,184 +140,223 @@
             };
 
             const renderSSA = (ssa) => {
-                return ssa.statements.map((stmt, i) => (
-                    <div key={i} className="mb-1">{new CFGGenerator().stmtToString(stmt)}</div>
-                )).concat(ssa.phiNodes.map((phi, i) => (
-                    <div key={`phi${i}`} className="mb-1">{`${phi.target} = phi(${phi.vars.join(', ')})`}</div>
-                )));
+                if (!ssa) return null;
+                return [
+                    ...(ssa.statements || []).map((stmt, i) =>
+                        React.createElement('div', { key: i, className: 'mb-1' }, new CFGGenerator().stmtToString(stmt))
+                    ),
+                    ...(ssa.phiNodes || []).map((phi, i) =>
+                        React.createElement('div', { key: `phi${i}`, className: 'mb-1' }, `${phi.target} = phi(${phi.vars.join(', ')})`)
+                    )
+                ];
             };
 
-            return (
-                <div className="container mx-auto p-6 max-w-6xl">
-                    <h1 className="text-3xl font-bold mb-6 text-gray-800">Program Analysis Tool</h1>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                        <div className="bg-white p-6 rounded-lg shadow-sm">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Mode:</label>
-                            <select
-                                value={mode}
-                                onChange={(e) => setMode(e.target.value)}
-                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="Verification">Verification</option>
-                                <option value="Equivalence">Equivalence</option>
-                            </select>
-                        </div>
+            const renderContent = () => {
+                switch (activeTab) {
+                    case 'analysis':
+                        return React.createElement('div', { className: 'space-y-6' },
+                            React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6' },
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Select the analysis mode' }, 'Mode:'),
+                                    React.createElement('select', {
+                                        value: mode,
+                                        onChange: e => setMode(e.target.value),
+                                        className: 'input-field w-full'
+                                    },
+                                        React.createElement('option', { value: 'Verification' }, 'Verification'),
+                                        React.createElement('option', { value: 'Equivalence' }, 'Equivalence')
+                                    )
+                                ),
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Set the maximum loop unrolling depth' }, 'Unrolling Depth:'),
+                                    React.createElement('input', {
+                                        type: 'number',
+                                        value: unrollDepth,
+                                        onChange: e => setUnrollDepth(parseInt(e.target.value)),
+                                        className: 'input-field w-full',
+                                        min: 1
+                                    })
+                                )
+                            ),
+                            React.createElement('div', { className: 'glass-card p-6' },
+                                React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Enter your program in the supported syntax' }, 'Program 1:'),
+                                React.createElement('textarea', {
+                                    value: program1,
+                                    onChange: e => setProgram1(e.target.value),
+                                    className: 'input-field w-full h-48 font-mono',
+                                    placeholder: 'Enter your program here...'
+                                })
+                            ),
+                            mode === 'Equivalence' && React.createElement('div', { className: 'glass-card p-6' },
+                                React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Enter the second program to compare' }, 'Program 2:'),
+                                React.createElement('textarea', {
+                                    value: program2,
+                                    onChange: e => setProgram2(e.target.value),
+                                    className: 'input-field w-full h-48 font-mono',
+                                    placeholder: 'Enter the second program here...'
+                                })
+                            ),
+                            React.createElement('button', {
+                                onClick: handleSubmit,
+                                disabled: loading,
+                                className: 'btn-primary w-full flex items-center justify-center space-x-2' + (loading ? ' opacity-75 cursor-not-allowed' : ''),
+                                'data-tippy-content': 'Start program analysis'
+                            },
+                                loading ? [
+                                    React.createElement('div', { className: 'loading-spinner', key: 'spinner' }),
+                                    React.createElement('span', { key: 'text' }, 'Analyzing...')
+                                ] : React.createElement('span', null, 'Analyze')
+                            )
+                        );
+                    case 'cfg':
+                        return result && React.createElement('div', { className: 'space-y-6' },
+                            React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6' },
+                                React.createElement('div', null,
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Original CFG'),
+                                    React.createElement('div', { id: 'cfg-original', className: 'glass-card h-[400px] cfg-container' })
+                                ),
+                                React.createElement('div', null,
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'SSA CFG'),
+                                    React.createElement('div', { id: 'cfg-ssa', className: 'glass-card h-[400px] cfg-container' })
+                                )
+                            )
+                        );
+                    case 'ssa':
+                        return result && React.createElement('div', { className: 'space-y-6' },
+                            React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6' },
+                                React.createElement('div', null,
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Unoptimized'),
+                                    React.createElement('pre', { className: 'code-block' },
+                                        mode === 'Equivalence'
+                                            ? [
+                                                React.createElement('div', { className: 'font-medium text-gray-300', key: 'p1' }, 'Program 1:'),
+                                                ...renderSSA(result.ssa[0]),
+                                                React.createElement('div', { className: 'font-medium mt-4 text-gray-300', key: 'p2' }, 'Program 2:'),
+                                                ...renderSSA(result.ssa[1])
+                                            ]
+                                            : renderSSA(result.ssa)
+                                    )
+                                ),
+                                React.createElement('div', null,
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Optimized'),
+                                    React.createElement('pre', { className: 'code-block' },
+                                        mode === 'Equivalence'
+                                            ? [
+                                                React.createElement('div', { className: 'font-medium text-gray-300', key: 'op1' }, 'Program 1:'),
+                                                ...renderSSA(result.optimizedSsa[0]),
+                                                React.createElement('div', { className: 'font-medium mt-4 text-gray-300', key: 'op2' }, 'Program 2:'),
+                                                ...renderSSA(result.optimizedSsa[1])
+                                            ]
+                                            : renderSSA(result.optimizedSsa)
+                                    )
+                                )
+                            )
+                        );
+                    case 'smt':
+                        return result && React.createElement('div', { className: 'space-y-6' },
+                            React.createElement('div', { className: 'glass-card p-6' },
+                                React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, 'SMT Constraints'),
+                                React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt)
+                            ),
+                            React.createElement('div', { className: 'glass-card p-6' },
+                                React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, 'Result'),
+                                React.createElement('div', { className: 'result-badge success mb-4' }, result.result),
+                                result.examples && result.examples.length > 0 && React.createElement('div', { className: 'mb-6' },
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Example(s):'),
+                                    result.examples.map((ex, i) =>
+                                        React.createElement('div', { key: i, className: 'glass-card p-4 mb-4' },
+                                            React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description),
+                                            React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+                                                Object.entries(ex.variables).map(([key, value]) =>
+                                                    React.createElement('div', { key },
+                                                        React.createElement('span', { className: 'text-gray-400' }, key + ':'),
+                                                        React.createElement('span', { className: 'text-emerald-400' }, value)
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                ),
+                                result.counterexamples && result.counterexamples.length > 0 && React.createElement('div', null,
+                                    React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Counterexample(s):'),
+                                    result.counterexamples.map((cex, i) =>
+                                        React.createElement('div', { key: i, className: 'glass-card p-4 mb-4 border-l-4 border-red-500' },
+                                            cex.failedAssertion && React.createElement('p', { className: 'text-red-400 mb-2' }, 'Failed assertion: ' + cex.failedAssertion),
+                                            cex.difference && React.createElement('p', { className: 'text-red-400 mb-2' }, cex.difference),
+                                            cex.differences && React.createElement('div', { className: 'mb-4' },
+                                                React.createElement('p', { className: 'text-red-400 mb-2' }, 'Variable differences:'),
+                                                cex.differences.map((diff, j) =>
+                                                    React.createElement('div', { key: j, className: 'ml-4 text-gray-300' }, `${diff.variable}: ${diff.program1Value} vs ${diff.program2Value}`)
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        );
+                    default:
+                        return null;
+                }
+            };
 
-                        <div className="bg-white p-6 rounded-lg shadow-sm">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Unrolling Depth:</label>
-                            <input
-                                type="number"
-                                value={unrollDepth}
-                                onChange={(e) => setUnrollDepth(parseInt(e.target.value))}
-                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                min="1"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Program 1:</label>
-                        <textarea
-                            value={program1}
-                            onChange={(e) => setProgram1(e.target.value)}
-                            className="w-full border border-gray-300 rounded-md shadow-sm p-2 h-48 font-mono focus:ring-indigo-500 focus:border-indigo-500"
-                            placeholder="Enter your program here..."
-                        />
-                    </div>
-
-                    {mode === 'Equivalence' && (
-                        <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Program 2:</label>
-                            <textarea
-                                value={program2}
-                                onChange={(e) => setProgram2(e.target.value)}
-                                className="w-full border border-gray-300 rounded-md shadow-sm p-2 h-48 font-mono focus:ring-indigo-500 focus:border-indigo-500"
-                                placeholder="Enter the second program here..."
-                            />
-                        </div>
-                    )}
-
-                    <button
-                        onClick={handleSubmit}
-                        disabled={loading}
-                        className={`w-full bg-indigo-600 text-white p-3 rounded-md font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
-                    >
-                        {loading ? 'Analyzing...' : 'Analyze'}
-                    </button>
-
-                    {loading && (
-                        <div className="loading mt-6">
-                            <div className="loading-spinner"></div>
-                        </div>
-                    )}
-
-                    {error && (
-                        <div className="mt-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-                            {error}
-                        </div>
-                    )}
-
-                    {result && !error && (
-                        <div className="mt-6 space-y-6">
-                            <div className="bg-white p-6 rounded-lg shadow-sm">
-                                <h2 className="text-xl font-semibold mb-4 text-gray-800">Analysis Results</h2>
-                                
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Original Program{mode === 'Equivalence' ? 's' : ''}</h3>
-                                    <pre className="code-block">
-                                        {mode === 'Equivalence' ? result.original.join('\n\n=== Program 2 ===\n\n') : result.original}
-                                    </pre>
-                                </div>
-
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">SSA Form</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <h4 className="font-medium mb-2 text-gray-600">Unoptimized</h4>
-                                            <pre className="code-block">
-                                                {mode === 'Equivalence' ? (
-                                                    <>
-                                                        <div className="font-medium">Program 1:</div>
-                                                        {renderSSA(result.ssa[0])}
-                                                        <div className="font-medium mt-4">Program 2:</div>
-                                                        {renderSSA(result.ssa[1])}
-                                                    </>
-                                                ) : renderSSA(result.ssa)}
-                                            </pre>
-                                        </div>
-                                        <div>
-                                            <h4 className="font-medium mb-2 text-gray-600">Optimized</h4>
-                                            <pre className="code-block">
-                                                {mode === 'Equivalence' ? (
-                                                    <>
-                                                        <div className="font-medium">Program 1:</div>
-                                                        {renderSSA(result.optimizedSsa[0])}
-                                                        <div className="font-medium mt-4">Program 2:</div>
-                                                        {renderSSA(result.optimizedSsa[1])}
-                                                    </>
-                                                ) : renderSSA(result.optimizedSsa)}
-                                            </pre>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">SMT Constraints</h3>
-                                    <pre className="code-block overflow-x-auto">{result.smt}</pre>
-                                </div>
-
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Control Flow Graphs</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <h4 className="font-medium mb-2 text-gray-600">Original CFG</h4>
-                                            <div id="cfg-original"></div>
-                                        </div>
-                                        <div>
-                                            <h4 className="font-medium mb-2 text-gray-600">SSA CFG</h4>
-                                            <div id="cfg-ssa"></div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">
-                                        Result: <span className={result.result === 'Satisfiable' || result.result === 'Equivalent' ? 'text-green-600' : 'text-red-600'}>
-                                            {result.result}
-                                        </span>
-                                    </h3>
-                                    
-                                    {result.examples.length > 0 && (
-                                        <div className="mb-4">
-                                            <h4 className="font-medium mb-2 text-gray-600">Example(s):</h4>
-                                            {result.examples.map((ex, i) => (
-                                                <pre key={i} className="code-block">
-                                                    {JSON.stringify(ex, null, 2)}
-                                                </pre>
-                                            ))}
-                                        </div>
-                                    )}
-                                    
-                                    {result.counterexamples.length > 0 && (
-                                        <div>
-                                            <h4 className="font-medium mb-2 text-gray-600">Counterexample(s):</h4>
-                                            {result.counterexamples.map((cex, i) => (
-                                                <pre key={i} className="code-block">
-                                                    {JSON.stringify(cex, null, 2)}
-                                                </pre>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
+            return React.createElement('div', { className: 'space-y-6' },
+                error && React.createElement('div', { className: 'glass-card p-4 border-l-4 border-red-500 animate-fade-in' },
+                    React.createElement('div', { className: 'flex items-center' },
+                        React.createElement('svg', { className: 'h-5 w-5 text-red-500 mr-2', viewBox: '0 0 20 20', fill: 'currentColor' },
+                            React.createElement('path', { fillRule: 'evenodd', d: 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z', clipRule: 'evenodd' })
+                        ),
+                        React.createElement('p', { className: 'text-red-400' }, error)
+                    )
+                ),
+                renderContent()
             );
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        window.addEventListener('load', () => {
+            const root = document.getElementById('root');
+            if (root) {
+                ReactDOM.render(React.createElement(App), root);
+            }
+        });
+    </script>
+
+    <script>
+        // Wait for window load event before initializing navigation
+        window.addEventListener('load', () => {
+            // Initialize tooltips
+            if (typeof tippy !== 'undefined') {
+                tippy('[data-tippy-content]', {
+                    theme: 'dark',
+                    animation: 'scale',
+                    duration: [200, 200],
+                });
+            }
+
+            // Create cyber lines
+            const cyberLinesContainer = document.getElementById('cyberLines');
+            if (cyberLinesContainer) {
+                for (let i = 0; i < 10; i++) {
+                    const line = document.createElement('div');
+                    line.className = 'cyber-line';
+                    line.style.top = `${Math.random() * 100}%`;
+                    line.style.animationDelay = `${Math.random() * 3}s`;
+                    cyberLinesContainer.appendChild(line);
+                }
+            }
+
+            // Create floating particles
+            const particlesContainer = document.getElementById('particles');
+            if (particlesContainer) {
+                for (let i = 0; i < 30; i++) {
+                    const particle = document.createElement('div');
+                    particle.className = 'particle';
+                    particle.style.left = `${Math.random() * 100}%`;
+                    particle.style.top = `${Math.random() * 100}%`;
+                    particle.style.animationDelay = `${Math.random() * 15}s`;
+                    particlesContainer.appendChild(particle);
+                }
+            }
+        });
     </script>
 </body>
 </html>

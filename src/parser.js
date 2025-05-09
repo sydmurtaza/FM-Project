@@ -10,7 +10,9 @@ class Parser {
         let tokens = [];
         let match;
         while ((match = tokenRegex.exec(input)) !== null) {
-            tokens.push(match[0]);
+            if (match[0].trim()) {
+                tokens.push(match[0].trim());
+            }
         }
         return tokens;
     }
@@ -20,10 +22,12 @@ class Parser {
     }
 
     consume(expected) {
-        if (this.peek() === expected) {
-            return this.tokens[this.pos++];
+        const token = this.peek();
+        if (token === expected) {
+            this.pos++;
+            return token;
         }
-        throw new Error(`Expected ${expected}, got ${this.peek()}`);
+        throw new Error(`Expected ${expected}, got ${token}`);
     }
 
     parseProgram() {
@@ -53,6 +57,7 @@ class Parser {
         if (!/^[a-zA-Z][\w]*$/.test(target) && target !== '[') {
             throw new Error(`Invalid variable name: ${target}`);
         }
+        
         if (target === '[') {
             this.consume('[');
             const array = this.consume(/^[a-zA-Z][\w]*$/);
@@ -63,7 +68,8 @@ class Parser {
             this.consume(';');
             return { type: 'ArrayAssignment', array, index, value };
         }
-        this.pos++;
+        
+        this.pos++; // Consume the variable name
         this.consume(':=');
         const value = this.parseExpression();
         this.consume(';');
@@ -173,4 +179,5 @@ class Parser {
     }
 }
 
-export default Parser;
+// Make it available globally (guarded)
+if (!window.Parser) window.Parser = Parser;
