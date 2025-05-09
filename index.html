@@ -28,26 +28,19 @@
     <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
+    <div class="bg-blob bg-blob-accent"></div>
+<div class="bg-blob bg-blob-blue"></div>
+<div class="bg-blob bg-blob-pink"></div>
     <div class="background-grid"></div>
     <div class="background-glow"></div>
     <div class="cyber-lines" id="cyberLines"></div>
     <div class="floating-particles" id="particles"></div>
 
     <div class="app-container">
+        <h2 class="main-heading"><span class="tool-highlight">Program Analysis Tool</span></h2>
         <main class="main-content">
-            <header class="header">
-                <div class="flex items-center justify-between w-full">
-                    <h2 class="text-xl font-semibold">Program Analysis Tool</h2>
-                    <div class="flex items-center space-x-4">
-                        <button class="btn-primary">
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                            </svg>
-                            Reset
-                        </button>
-                    </div>
-                </div>
-            </header>
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 10vh; width: 70vw;">
+            </div>
 
             <div class="content-wrapper">
                 <div id="root"></div>
@@ -104,15 +97,18 @@
                     const optimizedSsa1 = optimizer.optimize({ ...ssa1 });
                     console.log('Optimized SSA1:', optimizedSsa1);
                     const smtGen = new SMTGenerator();
+                    
+                    let analysisResult;
                     if (mode === 'Verification') {
                         const verificationResult = await smtGen.verifyProgram(optimizedSsa1);
                         console.log('Verification result:', verificationResult);
-                        setResult({
+                        analysisResult = {
                             original: program1,
+                            ast1,
                             ssa: ssa1,
                             optimizedSsa: optimizedSsa1,
                             ...verificationResult
-                        });
+                        };
                     } else {
                         console.log('Parsing program2:', program2);
                         const parser2 = new Parser(program2);
@@ -124,13 +120,17 @@
                         console.log('Optimized SSA2:', optimizedSsa2);
                         const equivalenceResult = await smtGen.checkEquivalence(optimizedSsa1, optimizedSsa2);
                         console.log('Equivalence result:', equivalenceResult);
-                        setResult({
+                        analysisResult = {
                             original: [program1, program2],
+                            ast1,
+                            ast2,
                             ssa: [ssa1, ssa2],
                             optimizedSsa: [optimizedSsa1, optimizedSsa2],
                             ...equivalenceResult
-                        });
+                        };
                     }
+                    console.log('Setting result:', analysisResult);
+                    setResult(analysisResult);
                 } catch (e) {
                     console.error('Analysis Error:', e);
                     setError(`Analysis failed: ${e.message}`);
@@ -150,6 +150,54 @@
                     )
                 ];
             };
+
+            // Improved AST pretty printer
+            function prettyPrintAST(node, indent = 0) {
+                const pad = '  '.repeat(indent);
+                if (!node) return '';
+                if (Array.isArray(node)) {
+                    return node.map(child => prettyPrintAST(child, indent)).join('\n');
+                }
+                if (typeof node !== 'object') {
+                    return pad + String(node);
+                }
+                switch (node.type) {
+                    case 'Program':
+                        return pad + 'Program\n' + prettyPrintAST(node.statements, indent + 1);
+                    case 'Assignment':
+                        return pad + `Assignment: ${node.target} := ${prettyPrintAST(node.value, 0).trim()}`;
+                    case 'IfElse':
+                        return pad + 'IfElse\n'
+                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                            + pad + '  then:\n' + prettyPrintAST(node.thenBranch, indent + 2)
+                            + (node.elseBranch ? '\n' + pad + '  else:\n' + prettyPrintAST(node.elseBranch, indent + 2) : '');
+                    case 'While':
+                        return pad + 'While\n'
+                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                            + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
+                    case 'For':
+                        return pad + 'For\n'
+                            + pad + '  init: ' + prettyPrintAST(node.init, 0).trim() + '\n'
+                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                            + pad + '  update: ' + prettyPrintAST(node.update, 0).trim() + '\n'
+                            + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
+                    case 'Assert':
+                        return pad + 'Assert: ' + prettyPrintAST(node.condition, 0).trim();
+                    case 'ArrayAssert':
+                        return pad + `ArrayAssert: forall ${node.varName} in range(${prettyPrintAST(node.rangeEnd, 0).trim()}): ${prettyPrintAST(node.condition, 0).trim()}`;
+                    case 'Binary':
+                        return `${prettyPrintAST(node.left, 0).trim()} ${node.op} ${prettyPrintAST(node.right, 0).trim()}`;
+                    case 'Constant':
+                        return String(node.value);
+                    case 'Variable':
+                        return String(node.name);
+                    case 'ArrayAccess':
+                        return `${node.array}[${prettyPrintAST(node.index, 0).trim()}]`;
+                    default:
+                        // fallback for unknown node types
+                        return pad + (node.type || '{') + '\n' + Object.entries(node).filter(([k]) => k !== 'type').map(([k, v]) => pad + '  ' + k + ': ' + prettyPrintAST(v, indent + 2)).join('\n');
+                }
+            }
 
             const renderContent = () => {
                 switch (activeTab) {
@@ -206,6 +254,80 @@
                                     React.createElement('div', { className: 'loading-spinner', key: 'spinner' }),
                                     React.createElement('span', { key: 'text' }, 'Analyzing...')
                                 ] : React.createElement('span', null, 'Analyze')
+                            ),
+                            result && React.createElement('div', { className: 'mt-8 space-y-6' },
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '1. Parsed AST'),
+                                    React.createElement('pre', { className: 'code-block overflow-x-auto' },
+                                        mode === 'Equivalence'
+                                            ? [
+                                                'Program 1:\n' + prettyPrintAST(result.ast1),
+                                                '\nProgram 2:\n' + prettyPrintAST(result.ast2)
+                                              ].join('')
+                                            : prettyPrintAST(result.ast1)
+                                    )
+                                ),
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '2. SSA Form (Unoptimized)'),
+                                    React.createElement('pre', { className: 'code-block overflow-x-auto' },
+                                        mode === 'Equivalence'
+                                            ? [
+                                                'Program 1:\n' + renderSSA(result.ssa[0]).map(line => line.props.children).join('\n'),
+                                                '\nProgram 2:\n' + renderSSA(result.ssa[1]).map(line => line.props.children).join('\n')
+                                              ].join('')
+                                            : renderSSA(result.ssa).map(line => line.props.children).join('\n')
+                                    )
+                                ),
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '3. SSA Form (Optimized)'),
+                                    React.createElement('pre', { className: 'code-block overflow-x-auto' },
+                                        mode === 'Equivalence'
+                                            ? [
+                                                'Program 1:\n' + renderSSA(result.optimizedSsa[0]).map(line => line.props.children).join('\n'),
+                                                '\nProgram 2:\n' + renderSSA(result.optimizedSsa[1]).map(line => line.props.children).join('\n')
+                                              ].join('')
+                                            : renderSSA(result.optimizedSsa).map(line => line.props.children).join('\n')
+                                    )
+                                ),
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '4. SMT Constraints'),
+                                    React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt)
+                                ),
+                                React.createElement('div', { className: 'glass-card p-6' },
+                                    React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '5. Results'),
+                                    React.createElement('div', { className: 'result-badge success mb-4' }, result.result),
+                                    result.examples && result.examples.length > 0 && React.createElement('div', { className: 'mt-4' },
+                                        React.createElement('h4', { className: 'font-medium mb-2 text-gray-400' }, 'Examples:'),
+                                        result.examples.map((ex, i) =>
+                                            React.createElement('div', { key: i, className: 'glass-card p-4 mb-4' },
+                                                React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description),
+                                                React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+                                                    Object.entries(ex.variables).map(([key, value]) =>
+                                                        React.createElement('div', { key },
+                                                            React.createElement('span', { className: 'text-gray-400' }, key + ':'),
+                                                            React.createElement('span', { className: 'text-emerald-400' }, value)
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    ),
+                                    result.counterexamples && result.counterexamples.length > 0 && React.createElement('div', { className: 'mt-4' },
+                                        React.createElement('h4', { className: 'font-medium mb-2 text-gray-400' }, 'Counterexamples:'),
+                                        result.counterexamples.map((cex, i) =>
+                                            React.createElement('div', { key: i, className: 'glass-card p-4 mb-4 border-l-4 border-red-500' },
+                                                cex.failedAssertion && React.createElement('p', { className: 'text-red-400 mb-2' }, 'Failed assertion: ' + cex.failedAssertion),
+                                                cex.difference && React.createElement('p', { className: 'text-red-400 mb-2' }, cex.difference),
+                                                cex.differences && React.createElement('div', { className: 'mb-4' },
+                                                    React.createElement('p', { className: 'text-red-400 mb-2' }, 'Variable differences:'),
+                                                    cex.differences.map((diff, j) =>
+                                                        React.createElement('div', { key: j, className: 'ml-4 text-gray-300' }, `${diff.variable}: ${diff.program1Value} vs ${diff.program2Value}`)
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
                             )
                         );
                     case 'cfg':

@@ -6,7 +6,7 @@ class Parser {
     }
 
     tokenize(input) {
-        const tokenRegex = /\s*(:=|if|else|while|for|assert|range|[(){};,\[\]]|[<>]=?|==|[+\-*/]|\w+|\d+)/g;
+        const tokenRegex = /\s*(:=|if|else|while|for|assert|range|[(){};,:\[\]]|[<>]=?|==|[+\-*/]|\w+|\d+)/g;
         let tokens = [];
         let match;
         while ((match = tokenRegex.exec(input)) !== null) {
@@ -23,7 +23,13 @@ class Parser {
 
     consume(expected) {
         const token = this.peek();
-        if (token === expected) {
+        if (expected instanceof RegExp) {
+            if (expected.test(token)) {
+                this.pos++;
+                return token;
+            }
+            throw new Error(`Expected ${expected}, got ${token}`);
+        } else if (token === expected) {
             this.pos++;
             return token;
         }
@@ -57,7 +63,26 @@ class Parser {
         if (!/^[a-zA-Z][\w]*$/.test(target) && target !== '[') {
             throw new Error(`Invalid variable name: ${target}`);
         }
-        
+        // Support arr[index] := value;
+        if (/^[a-zA-Z][\w]*$/.test(target)) {
+            this.pos++;
+            let lhs = { type: 'Variable', name: target };
+            while (this.peek() === '[') {
+                this.consume('[');
+                const index = this.parseExpression();
+                this.consume(']');
+                lhs = { type: 'ArrayAccess', array: lhs.name, index };
+            }
+            this.consume(':=');
+            const value = this.parseExpression();
+            this.consume(';');
+            if (lhs.type === 'ArrayAccess') {
+                return { type: 'ArrayAssignment', array: lhs.array, index: lhs.index, value };
+            } else {
+                return { type: 'Assignment', target: lhs.name, value };
+            }
+        }
+        // Old-style: [arr i] := value;
         if (target === '[') {
             this.consume('[');
             const array = this.consume(/^[a-zA-Z][\w]*$/);
@@ -68,12 +93,6 @@ class Parser {
             this.consume(';');
             return { type: 'ArrayAssignment', array, index, value };
         }
-        
-        this.pos++; // Consume the variable name
-        this.consume(':=');
-        const value = this.parseExpression();
-        this.consume(';');
-        return { type: 'Assignment', target, value };
     }
 
     parseIfElse() {
@@ -111,7 +130,23 @@ class Parser {
         const init = this.parseAssignment();
         const condition = this.parseExpression();
         this.consume(';');
-        const update = this.parseAssignment();
+        // Parse update assignment, but do not require a trailing semicolon
+        const updateStart = this.pos;
+        let update;
+        try {
+            update = this.parseAssignment();
+        } catch (e) {
+            // If parseAssignment fails due to missing semicolon, try parsing as assignment without semicolon
+            this.pos = updateStart;
+            const target = this.peek();
+            if (!/^[a-zA-Z][\w]*$/.test(target) && target !== '[') {
+                throw new Error(`Invalid variable name: ${target}`);
+            }
+            this.pos++;
+            this.consume(':=');
+            const value = this.parseExpression();
+            update = { type: 'Assignment', target, value };
+        }
         this.consume(')');
         this.consume('{');
         const body = this.parseProgram();
@@ -162,7 +197,15 @@ class Parser {
             return { type: 'Constant', value: parseInt(token) };
         } else if (/^[a-zA-Z][\w]*$/.test(token)) {
             this.pos++;
-            return { type: 'Variable', name: token };
+            let node = { type: 'Variable', name: token };
+            // Support array access: arr[j]
+            while (this.peek() === '[') {
+                this.consume('[');
+                const index = this.parseExpression();
+                this.consume(']');
+                node = { type: 'ArrayAccess', array: node.name, index };
+            }
+            return node;
         } else if (token === '[') {
             this.consume('[');
             const array = this.consume(/^[a-zA-Z][\w]*$/);
