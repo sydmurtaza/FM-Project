@@ -4,22 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Analysis Tool</title>
-    <!-- Add React and ReactDOM -->
-    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <!-- Add React and ReactDOM from cdn.jsdelivr.net -->
+    <script src="https://cdn.jsdelivr.net/npm/react@17/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@17/umd/react-dom.development.js"></script>
     <!-- Add Cytoscape and Dagre -->
-    <script src="https://unpkg.com/cytoscape@3.19.0/dist/cytoscape.min.js"></script>
-    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
-    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.19.0/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
     <!-- Add Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Add Framer Motion for animations -->
-    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.4/dist/framer-motion.js"></script>
     <!-- Add custom fonts -->
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Add Tippy.js for tooltips -->
-    <script src="https://unpkg.com/@popperjs/core@2"></script>
-    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tippy.js@6/dist/tippy-bundle.umd.min.js"></script>
     <!-- Load modules first -->
     <script src="src/parser.js"></script>
     <script src="src/cfg.js"></script>
@@ -29,8 +29,8 @@
 </head>
 <body>
     <div class="bg-blob bg-blob-accent"></div>
-<div class="bg-blob bg-blob-blue"></div>
-<div class="bg-blob bg-blob-pink"></div>
+    <div class="bg-blob bg-blob-blue"></div>
+    <div class="bg-blob bg-blob-pink"></div>
     <div class="background-grid"></div>
     <div class="background-glow"></div>
     <div class="cyber-lines" id="cyberLines"></div>
@@ -48,7 +48,7 @@
         </main>
     </div>
 
-    <!-- All other scripts should come before this -->
+    <!-- Main application script -->
     <script>
         const { useState, useEffect } = React;
 
@@ -133,22 +133,44 @@
                     setResult(analysisResult);
                 } catch (e) {
                     console.error('Analysis Error:', e);
-                    setError(`Analysis failed: ${e.message}`);
+                    setError(`Analysis failed: ${e.message}${e.stack ? '\nStack: ' + e.stack : ''}`);
                 } finally {
                     setLoading(false);
                 }
             };
 
             const renderSSA = (ssa) => {
-                if (!ssa) return null;
-                return [
-                    ...(ssa.statements || []).map((stmt, i) =>
-                        React.createElement('div', { key: i, className: 'mb-1' }, new CFGGenerator().stmtToString(stmt))
-                    ),
-                    ...(ssa.phiNodes || []).map((phi, i) =>
-                        React.createElement('div', { key: `phi${i}`, className: 'mb-1' }, `${phi.target} = phi(${phi.vars.join(', ')})`)
-                    )
-                ];
+                if (!ssa || !ssa.statements) return null;
+                return ssa.statements.map((stmt, i) => {
+                    let content;
+                    try {
+                        switch (stmt.type) {
+                            case 'Assignment':
+                                content = `${stmt.target} = ${new CFGGenerator().exprToString(stmt.value)}`;
+                                break;
+                            case 'ArrayAssignment':
+                                content = `${stmt.array}[${new CFGGenerator().exprToString(stmt.index)}] = ${new CFGGenerator().exprToString(stmt.value)}`;
+                                break;
+                            case 'Assume':
+                                content = `assume(${new CFGGenerator().exprToString(stmt.condition)})`;
+                                break;
+                            case 'Assert':
+                                content = `assert(${new CFGGenerator().exprToString(stmt.condition)})`;
+                                break;
+                            case 'ArrayAssert':
+                                content = `forall ${stmt.varName} in range(${new CFGGenerator().exprToString(stmt.rangeEnd)}): assert(${new CFGGenerator().exprToString(stmt.condition)})`;
+                                break;
+                            case 'Phi':
+                                content = `${stmt.target} = phi(${stmt.vars.join(', ')})`;
+                                break;
+                            default:
+                                content = new CFGGenerator().stmtToString(stmt);
+                        }
+                    } catch (e) {
+                        content = `Error rendering statement: ${e.message}`;
+                    }
+                    return React.createElement('div', { key: i, className: 'mb-1' }, content);
+                });
             };
 
             // Improved AST pretty printer
@@ -161,41 +183,49 @@
                 if (typeof node !== 'object') {
                     return pad + String(node);
                 }
-                switch (node.type) {
-                    case 'Program':
-                        return pad + 'Program\n' + prettyPrintAST(node.statements, indent + 1);
-                    case 'Assignment':
-                        return pad + `Assignment: ${node.target} := ${prettyPrintAST(node.value, 0).trim()}`;
-                    case 'IfElse':
-                        return pad + 'IfElse\n'
-                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
-                            + pad + '  then:\n' + prettyPrintAST(node.thenBranch, indent + 2)
-                            + (node.elseBranch ? '\n' + pad + '  else:\n' + prettyPrintAST(node.elseBranch, indent + 2) : '');
-                    case 'While':
-                        return pad + 'While\n'
-                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
-                            + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
-                    case 'For':
-                        return pad + 'For\n'
-                            + pad + '  init: ' + prettyPrintAST(node.init, 0).trim() + '\n'
-                            + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
-                            + pad + '  update: ' + prettyPrintAST(node.update, 0).trim() + '\n'
-                            + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
-                    case 'Assert':
-                        return pad + 'Assert: ' + prettyPrintAST(node.condition, 0).trim();
-                    case 'ArrayAssert':
-                        return pad + `ArrayAssert: forall ${node.varName} in range(${prettyPrintAST(node.rangeEnd, 0).trim()}): ${prettyPrintAST(node.condition, 0).trim()}`;
-                    case 'Binary':
-                        return `${prettyPrintAST(node.left, 0).trim()} ${node.op} ${prettyPrintAST(node.right, 0).trim()}`;
-                    case 'Constant':
-                        return String(node.value);
-                    case 'Variable':
-                        return String(node.name);
-                    case 'ArrayAccess':
-                        return `${node.array}[${prettyPrintAST(node.index, 0).trim()}]`;
-                    default:
-                        // fallback for unknown node types
-                        return pad + (node.type || '{') + '\n' + Object.entries(node).filter(([k]) => k !== 'type').map(([k, v]) => pad + '  ' + k + ': ' + prettyPrintAST(v, indent + 2)).join('\n');
+                try {
+                    switch (node.type) {
+                        case 'Program':
+                            return pad + 'Program\n' + prettyPrintAST(node.statements, indent + 1);
+                        case 'Assignment':
+                            return pad + `Assignment: ${node.target} := ${prettyPrintAST(node.value, 0).trim()}`;
+                        case 'ArrayAssignment':
+                            return pad + `ArrayAssignment: ${node.array}[${prettyPrintAST(node.index, 0).trim()}] := ${prettyPrintAST(node.value, 0).trim()}`;
+                        case 'IfElse':
+                            return pad + 'IfElse\n'
+                                + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                                + pad + '  then:\n' + prettyPrintAST(node.thenBranch, indent + 2)
+                                + (node.elseBranch ? '\n' + pad + '  else:\n' + prettyPrintAST(node.elseBranch, indent + 2) : '');
+                        case 'While':
+                            return pad + 'While\n'
+                                + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                                + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
+                        case 'For':
+                            return pad + 'For\n'
+                                + pad + '  init: ' + prettyPrintAST(node.init, 0).trim() + '\n'
+                                + pad + '  condition: ' + prettyPrintAST(node.condition, 0).trim() + '\n'
+                                + pad + '  update: ' + prettyPrintAST(node.update, 0).trim() + '\n'
+                                + pad + '  body:\n' + prettyPrintAST(node.body, indent + 2);
+                        case 'Assert':
+                            return pad + 'Assert: ' + prettyPrintAST(node.condition, 0).trim();
+                        case 'ArrayAssert':
+                            return pad + `ArrayAssert: forall ${node.varName} in range(${prettyPrintAST(node.rangeEnd, 0).trim()}): ${prettyPrintAST(node.condition, 0).trim()}`;
+                        case 'Binary':
+                            return `${prettyPrintAST(node.left, 0).trim()} ${node.op} ${prettyPrintAST(node.right, 0).trim()}`;
+                        case 'Constant':
+                            return String(node.value);
+                        case 'Variable':
+                            return String(node.name);
+                        case 'ArrayAccess':
+                            return `${node.array}[${prettyPrintAST(node.index, 0).trim()}]`;
+                        case 'Unary':
+                            return `${node.op}(${prettyPrintAST(node.arg, 0).trim()})`;
+                        default:
+                            // fallback for unknown node types
+                            return pad + (node.type || '{') + '\n' + Object.entries(node).filter(([k]) => k !== 'type').map(([k, v]) => pad + '  ' + k + ': ' + prettyPrintAST(v, indent + 2)).join('\n');
+                    }
+                } catch (e) {
+                    return pad + `Error in AST node: ${e.message}`;
                 }
             }
 
@@ -220,19 +250,19 @@
                                     React.createElement('input', {
                                         type: 'number',
                                         value: unrollDepth,
-                                        onChange: e => setUnrollDepth(parseInt(e.target.value)),
+                                        onChange: e => setUnrollDepth(parseInt(e.target.value) || 1),
                                         className: 'input-field w-full',
                                         min: 1
                                     })
                                 )
                             ),
                             React.createElement('div', { className: 'glass-card p-6' },
-                                React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Enter your program in the supported syntax' }, 'Program 1:'),
+                                React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-2', 'data-tippy-content': 'Enter your program in the supported syntax (supports arrays, asserts, and loops)' }, 'Program 1:'),
                                 React.createElement('textarea', {
                                     value: program1,
                                     onChange: e => setProgram1(e.target.value),
                                     className: 'input-field w-full h-48 font-mono',
-                                    placeholder: 'Enter your program here...'
+                                    placeholder: 'Enter your program here (e.g., arr[0] := 1; assert(arr[0] > 0);)'
                                 })
                             ),
                             mode === 'Equivalence' && React.createElement('div', { className: 'glass-card p-6' },
@@ -255,6 +285,14 @@
                                     React.createElement('span', { key: 'text' }, 'Analyzing...')
                                 ] : React.createElement('span', null, 'Analyze')
                             ),
+                            error && React.createElement('div', { className: 'glass-card p-4 border-l-4 border-red-500 animate-fade-in' },
+                                React.createElement('div', { className: 'flex items-center' },
+                                    React.createElement('svg', { className: 'h-5 w-5 text-red-500 mr-2', viewBox: '0 0 20 20', fill: 'currentColor' },
+                                        React.createElement('path', { fillRule: 'evenodd', d: 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z', clipRule: 'evenodd' })
+                                    ),
+                                    React.createElement('p', { className: 'text-red-400' }, error)
+                                )
+                            ),
                             result && React.createElement('div', { className: 'mt-8 space-y-6' },
                                 React.createElement('div', { className: 'glass-card p-6' },
                                     React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '1. Parsed AST'),
@@ -272,10 +310,10 @@
                                     React.createElement('pre', { className: 'code-block overflow-x-auto' },
                                         mode === 'Equivalence'
                                             ? [
-                                                'Program 1:\n' + renderSSA(result.ssa[0]).map(line => line.props.children).join('\n'),
-                                                '\nProgram 2:\n' + renderSSA(result.ssa[1]).map(line => line.props.children).join('\n')
+                                                'Program 1:\n' + (renderSSA(result.ssa[0]) || []).map(line => line.props.children).join('\n'),
+                                                '\nProgram 2:\n' + (renderSSA(result.ssa[1]) || []).map(line => line.props.children).join('\n')
                                               ].join('')
-                                            : renderSSA(result.ssa).map(line => line.props.children).join('\n')
+                                            : (renderSSA(result.ssa) || []).map(line => line.props.children).join('\n')
                                     )
                                 ),
                                 React.createElement('div', { className: 'glass-card p-6' },
@@ -283,29 +321,29 @@
                                     React.createElement('pre', { className: 'code-block overflow-x-auto' },
                                         mode === 'Equivalence'
                                             ? [
-                                                'Program 1:\n' + renderSSA(result.optimizedSsa[0]).map(line => line.props.children).join('\n'),
-                                                '\nProgram 2:\n' + renderSSA(result.optimizedSsa[1]).map(line => line.props.children).join('\n')
+                                                'Program 1:\n' + (renderSSA(result.optimizedSsa[0]) || []).map(line => line.props.children).join('\n'),
+                                                '\nProgram 2:\n' + (renderSSA(result.optimizedSsa[1]) || []).map(line => line.props.children).join('\n')
                                               ].join('')
-                                            : renderSSA(result.optimizedSsa).map(line => line.props.children).join('\n')
+                                            : (renderSSA(result.optimizedSsa) || []).map(line => line.props.children).join('\n')
                                     )
                                 ),
                                 React.createElement('div', { className: 'glass-card p-6' },
                                     React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '4. SMT Constraints'),
-                                    React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt)
+                                    React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt || 'No SMT constraints generated')
                                 ),
                                 React.createElement('div', { className: 'glass-card p-6' },
                                     React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, '5. Results'),
-                                    React.createElement('div', { className: 'result-badge success mb-4' }, result.result),
+                                    React.createElement('div', { className: 'result-badge success mb-4' }, result.result || 'No result available'),
                                     result.examples && result.examples.length > 0 && React.createElement('div', { className: 'mt-4' },
                                         React.createElement('h4', { className: 'font-medium mb-2 text-gray-400' }, 'Examples:'),
                                         result.examples.map((ex, i) =>
                                             React.createElement('div', { key: i, className: 'glass-card p-4 mb-4' },
-                                                React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description),
+                                                React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description || 'Example ' + (i + 1)),
                                                 React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
-                                                    Object.entries(ex.variables).map(([key, value]) =>
+                                                    Object.entries(ex.variables || {}).map(([key, value]) =>
                                                         React.createElement('div', { key },
                                                             React.createElement('span', { className: 'text-gray-400' }, key + ':'),
-                                                            React.createElement('span', { className: 'text-emerald-400' }, value)
+                                                            React.createElement('span', { className: 'text-emerald-400' }, String(value))
                                                         )
                                                     )
                                                 )
@@ -320,7 +358,7 @@
                                                 cex.difference && React.createElement('p', { className: 'text-red-400 mb-2' }, cex.difference),
                                                 cex.differences && React.createElement('div', { className: 'mb-4' },
                                                     React.createElement('p', { className: 'text-red-400 mb-2' }, 'Variable differences:'),
-                                                    cex.differences.map((diff, j) =>
+                                                    (cex.differences || []).map((diff, j) =>
                                                         React.createElement('div', { key: j, className: 'ml-4 text-gray-300' }, `${diff.variable}: ${diff.program1Value} vs ${diff.program2Value}`)
                                                     )
                                                 )
@@ -352,11 +390,11 @@
                                         mode === 'Equivalence'
                                             ? [
                                                 React.createElement('div', { className: 'font-medium text-gray-300', key: 'p1' }, 'Program 1:'),
-                                                ...renderSSA(result.ssa[0]),
+                                                ...(renderSSA(result.ssa[0]) || []),
                                                 React.createElement('div', { className: 'font-medium mt-4 text-gray-300', key: 'p2' }, 'Program 2:'),
-                                                ...renderSSA(result.ssa[1])
+                                                ...(renderSSA(result.ssa[1]) || [])
                                             ]
-                                            : renderSSA(result.ssa)
+                                            : renderSSA(result.ssa) || []
                                     )
                                 ),
                                 React.createElement('div', null,
@@ -365,11 +403,11 @@
                                         mode === 'Equivalence'
                                             ? [
                                                 React.createElement('div', { className: 'font-medium text-gray-300', key: 'op1' }, 'Program 1:'),
-                                                ...renderSSA(result.optimizedSsa[0]),
+                                                ...(renderSSA(result.optimizedSsa[0]) || []),
                                                 React.createElement('div', { className: 'font-medium mt-4 text-gray-300', key: 'op2' }, 'Program 2:'),
-                                                ...renderSSA(result.optimizedSsa[1])
+                                                ...(renderSSA(result.optimizedSsa[1]) || [])
                                             ]
-                                            : renderSSA(result.optimizedSsa)
+                                            : renderSSA(result.optimizedSsa) || []
                                     )
                                 )
                             )
@@ -378,21 +416,21 @@
                         return result && React.createElement('div', { className: 'space-y-6' },
                             React.createElement('div', { className: 'glass-card p-6' },
                                 React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, 'SMT Constraints'),
-                                React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt)
+                                React.createElement('pre', { className: 'code-block overflow-x-auto' }, result.smt || 'No SMT constraints generated')
                             ),
                             React.createElement('div', { className: 'glass-card p-6' },
                                 React.createElement('h3', { className: 'text-lg font-medium mb-4 text-gray-300' }, 'Result'),
-                                React.createElement('div', { className: 'result-badge success mb-4' }, result.result),
+                                React.createElement('div', { className: 'result-badge success mb-4' }, result.result || 'No result available'),
                                 result.examples && result.examples.length > 0 && React.createElement('div', { className: 'mb-6' },
                                     React.createElement('h4', { className: 'font-medium mb-3 text-gray-400' }, 'Example(s):'),
                                     result.examples.map((ex, i) =>
                                         React.createElement('div', { key: i, className: 'glass-card p-4 mb-4' },
-                                            React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description),
+                                            React.createElement('p', { className: 'text-gray-300 mb-2' }, ex.description || 'Example ' + (i + 1)),
                                             React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
-                                                Object.entries(ex.variables).map(([key, value]) =>
+                                                Object.entries(ex.variables || {}).map(([key, value]) =>
                                                     React.createElement('div', { key },
                                                         React.createElement('span', { className: 'text-gray-400' }, key + ':'),
-                                                        React.createElement('span', { className: 'text-emerald-400' }, value)
+                                                        React.createElement('span', { className: 'text-emerald-400' }, String(value))
                                                     )
                                                 )
                                             )
@@ -407,7 +445,7 @@
                                             cex.difference && React.createElement('p', { className: 'text-red-400 mb-2' }, cex.difference),
                                             cex.differences && React.createElement('div', { className: 'mb-4' },
                                                 React.createElement('p', { className: 'text-red-400 mb-2' }, 'Variable differences:'),
-                                                cex.differences.map((diff, j) =>
+                                                (cex.differences || []).map((diff, j) =>
                                                     React.createElement('div', { key: j, className: 'ml-4 text-gray-300' }, `${diff.variable}: ${diff.program1Value} vs ${diff.program2Value}`)
                                                 )
                                             )
